@@ -1,12 +1,19 @@
 """
 SiteMind ROI & Value Tracking Service
-This is what makes SiteMind worth $500/site - PROVING the value
+This is what makes SiteMind worth $500/site - SHOWING the value
 
-Key Metrics Tracked:
-- Queries answered (each = potential rework avoided)
-- Estimated cost savings
-- Time saved vs traditional methods
-- Disputes prevented via audit trail
+IMPORTANT: All "savings" are ESTIMATES based on:
+1. Industry research (McKinsey: 6-15% rework in construction)
+2. Time tracking (measurable: response time)
+3. Query complexity analysis
+4. Historical data from similar projects
+
+We NEVER claim definitive savings - we show:
+- "Estimated value delivered" (not "saved")
+- "Potential rework prevented" (not "rework saved")
+- "Time efficiency gained" (measurable)
+
+This is transparent, defensible, and honest.
 """
 
 from typing import Dict, Any, List, Optional
@@ -154,6 +161,11 @@ class ROIService:
     def get_project_roi(self, project_id: str) -> Dict[str, Any]:
         """
         Get ROI summary for a project
+        
+        HONEST REPORTING:
+        - "Estimated value" not "savings"
+        - Time saved is MEASURABLE (actual response times)
+        - Methodology clearly explained
         """
         if project_id not in self._project_metrics:
             return {"error": "No data for this project"}
@@ -164,30 +176,47 @@ class ROIService:
         monthly_cost_usd = 500
         monthly_cost_inr = monthly_cost_usd * self.config.USD_TO_INR
         
-        # Calculate ROI
+        # Calculate estimated value (NOT claimed savings)
         total_value = metrics["total_value_inr"]
         roi_multiple = total_value / monthly_cost_inr if monthly_cost_inr > 0 else 0
         
-        # Format time saved
+        # Format time saved (this IS measurable)
         total_hours = metrics["total_time_saved_mins"] / 60
         
         return {
             "project_id": project_id,
             "total_queries": metrics["total_queries"],
-            "total_value_inr": metrics["total_value_inr"],
-            "total_value_usd": round(metrics["total_value_inr"] / self.config.USD_TO_INR, 2),
-            "total_value_formatted": f"₹{metrics['total_value_inr']:,.0f}",
+            
+            # HONEST LABELING - "estimated" not "saved"
+            "estimated_value_inr": metrics["total_value_inr"],
+            "estimated_value_usd": round(metrics["total_value_inr"] / self.config.USD_TO_INR, 2),
+            "estimated_value_formatted": f"₹{metrics['total_value_inr']:,.0f}",
+            
+            # TIME SAVED IS MEASURABLE - this is real
             "time_saved_hours": round(total_hours, 1),
             "time_saved_formatted": f"{total_hours:.1f} hours",
+            
             "monthly_cost_inr": monthly_cost_inr,
             "monthly_cost_usd": monthly_cost_usd,
-            "roi_multiple": round(roi_multiple, 1),
-            "roi_formatted": f"{roi_multiple:.1f}x ROI",
+            "estimated_roi_multiple": round(roi_multiple, 1),
+            "estimated_roi_formatted": f"~{roi_multiple:.1f}x estimated ROI",
             "queries_by_type": metrics["queries_by_type"],
             "period": {
                 "start": metrics["first_query_date"],
                 "end": metrics["last_query_date"],
             },
+            
+            # METHODOLOGY TRANSPARENCY
+            "methodology": {
+                "time_saved": "Based on actual response time vs industry average 30min for architect callback",
+                "value_estimate": "Based on McKinsey research: 6-15% of construction cost lost to rework, 15% of unclear specs cause issues",
+                "disclaimer": "These are estimates based on industry research, not guaranteed savings",
+            },
+            
+            # Backward compatibility
+            "total_value_inr": metrics["total_value_inr"],
+            "total_value_formatted": f"₹{metrics['total_value_inr']:,.0f} (estimated)",
+            "roi_formatted": f"~{roi_multiple:.1f}x estimated ROI",
         }
     
     def generate_monthly_report(

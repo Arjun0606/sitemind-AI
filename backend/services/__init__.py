@@ -16,6 +16,7 @@ from services.whatsapp_client import WhatsAppClient
 from services.storage_service import StorageService
 from services.roi_service import ROIService
 from services.report_service import ReportService
+from services.subscription_service import SubscriptionService
 
 __all__ = [
     "GeminiService",
@@ -24,5 +25,6 @@ __all__ = [
     "StorageService",
     "ROIService",
     "ReportService",
+    "SubscriptionService",
 ]
 

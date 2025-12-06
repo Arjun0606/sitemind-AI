@@ -68,11 +68,12 @@ class ReportService:
 • Other: {len(queries) - dimension_queries - rfi_queries - change_queries}
 
 ━━━━━━━━━━━━━━━━━━━━━
-💰 *ROI Summary*
+💰 *Value Summary*
 ━━━━━━━━━━━━━━━━━━━━━
 Monthly Cost: ₹41,500 ($500)
-Value This Week: {roi_data.get('total_value_formatted', '₹0')}
-Running ROI: {roi_data.get('roi_formatted', 'N/A')}
+Estimated Value: {roi_data.get('estimated_value_formatted', roi_data.get('total_value_formatted', '₹0'))}
+Estimated ROI: {roi_data.get('estimated_roi_formatted', roi_data.get('roi_formatted', 'N/A'))}
+_Based on industry benchmarks_
 
 ━━━━━━━━━━━━━━━━━━━━━
 🎯 *Top Queries This Week*
