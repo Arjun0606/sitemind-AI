@@ -4,176 +4,219 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)](https://fastapi.tiangolo.com)
+[![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)]()
 
 ## 🎯 What is SiteMind?
 
-SiteMind is an AI-powered assistant for construction site engineers in India. It lives in WhatsApp and can:
+SiteMind is an AI-powered assistant for construction site engineers in India. It combines:
 
-- 📐 **Read Blueprints** - Powered by Gemini 2.5 Pro (best-in-class AI)
-- 🎤 **Understand Voice** - Send voice notes while on scaffolding
-- 📷 **Analyze Photos** - Upload site photos to verify against blueprints
-- 🧠 **Remember Everything** - Recalls RFIs, change orders, and past decisions
+- **📱 WhatsApp Interface** - Site engineers query via WhatsApp while on scaffolding
+- **🖥️ Web Dashboard** - Management monitors ROI, analytics, and audit trails
+- **🤖 Gemini 2.5 Pro** - Best-in-class AI for blueprint analysis
 
-**Premium AI Stack:** At $500/site, we use the absolute best models - Gemini 2.5 Pro with reasoning capabilities for maximum accuracy on critical construction data.
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| 📐 **Blueprint Analysis** | AI reads and answers questions about construction drawings |
+| 📷 **Photo Analysis** | Upload site photos to verify against blueprints |
+| 🧠 **Project Memory** | Recalls RFIs, change orders, and all decisions |
+| 📊 **ROI Tracking** | Shows estimated value delivered to justify subscription |
+| 📋 **Audit Trail** | Complete history with citations for legal backing |
+| 📈 **Auto Reports** | Weekly/monthly reports to stakeholders |
 
 **Problem Solved:** Indian construction projects lose 6-15% of project value to rework. SiteMind prevents costly errors by giving engineers instant, accurate information.
 
-## 🚀 Quick Start
+## 💰 Pricing
 
-### Prerequisites
+| Sites | Discount | Price per Site |
+|-------|----------|----------------|
+| 1-2 sites | — | **$500/month** |
+| 3-5 sites | 10% off | $450/month |
+| 6-9 sites | 15% off | $425/month |
+| 10+ sites | 25% off | $375/month |
 
-- Python 3.11+
-- API Keys for:
-  - Google Gemini (AI) - [aistudio.google.com](https://aistudio.google.com/apikey)
-  - Twilio (WhatsApp) - [twilio.com](https://twilio.com)
-  - Supabase (DB + Storage) - [supabase.com](https://supabase.com)
+**UNLIMITED queries** - No token limits, no usage caps. Everything included.
 
-### Installation
+## 🏛️ Architecture
 
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/sitemind.git
-cd sitemind/backend
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your API keys
-
-# Initialize database
-python -c "from utils.database import init_db_sync; init_db_sync()"
-
-# Run the server
-python main.py
 ```
-
-The API will be available at `http://localhost:8000`
-
-### Test the Setup
-
-```bash
-# Run all integration tests
-python prototype.py --test-all
-
-# Interactive demo (requires Gemini API key)
-python prototype.py --demo
+┌─────────────────────────────────────────────────────────────────┐
+│                        SiteMind Platform                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   Site Engineers                        Management               │
+│   ┌─────────────┐                      ┌─────────────────┐       │
+│   │  WhatsApp   │                      │  Web Dashboard  │       │
+│   │  (Twilio)   │                      │  (Next.js)      │       │
+│   └──────┬──────┘                      └────────┬────────┘       │
+│          │                                      │                │
+│          └──────────────────┬───────────────────┘                │
+│                             │                                    │
+│                    ┌────────▼────────┐                           │
+│                    │  FastAPI Backend │                          │
+│                    │  (Python 3.11+) │                           │
+│                    └────────┬────────┘                           │
+│                             │                                    │
+│   ┌───────────────┬─────────┼─────────┬───────────────┐          │
+│   │               │         │         │               │          │
+│   ▼               ▼         ▼         ▼               ▼          │
+│ ┌─────┐     ┌──────────┐ ┌──────┐ ┌────────┐   ┌──────────┐      │
+│ │Gemini│     │Supermemory│ │Supabase│ │ ROI   │   │ Reports │     │
+│ │2.5 Pro│    │(Memory)  │ │(DB/Files)│ │Service│   │ Service │    │
+│ └─────┘     └──────────┘ └──────┘ └────────┘   └──────────┘      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## 📁 Project Structure
 
 ```
 sitemind/
-├── backend/
-│   ├── main.py                 # FastAPI entry point
-│   ├── config.py               # Configuration management
-│   ├── prototype.py            # Testing & demo script
-│   ├── requirements.txt        # Python dependencies
+├── backend/                    # FastAPI Backend
+│   ├── main.py                 # Entry point
+│   ├── config.py               # Configuration
+│   ├── prototype.py            # Testing & demo
+│   ├── requirements.txt        # Dependencies
 │   ├── routers/
-│   │   ├── whatsapp.py         # WhatsApp webhook handlers
-│   │   ├── admin.py            # Admin CRUD endpoints
-│   │   └── analytics.py        # Usage analytics
+│   │   ├── whatsapp.py         # WhatsApp webhooks
+│   │   ├── admin.py            # Admin endpoints
+│   │   └── analytics.py        # Analytics API
 │   ├── services/
-│   │   ├── gemini_service.py   # Google Gemini AI
-│   │   ├── whisper_service.py  # Voice transcription
-│   │   ├── memory_service.py   # Long-term memory
-│   │   ├── whatsapp_client.py  # Twilio WhatsApp
-│   │   └── storage_service.py  # AWS S3 storage
+│   │   ├── gemini_service.py   # AI (Gemini 2.5 Pro)
+│   │   ├── memory_service.py   # Project memory
+│   │   ├── storage_service.py  # Supabase storage
+│   │   ├── whatsapp_client.py  # Twilio client
+│   │   ├── roi_service.py      # ROI calculations
+│   │   ├── report_service.py   # Auto reports
+│   │   ├── subscription_service.py  # Billing logic
+│   │   └── pricing_service.py  # Pricing rules
 │   ├── models/
 │   │   ├── database.py         # SQLAlchemy models
 │   │   └── schemas.py          # Pydantic schemas
-│   └── utils/
-│       ├── database.py         # DB connection
-│       ├── logger.py           # Logging config
-│       └── helpers.py          # Utility functions
+│   └── utils/                  # Utilities
+│
+├── dashboard/                  # Next.js Dashboard
+│   ├── src/
+│   │   ├── pages/              # Dashboard pages
+│   │   │   ├── index.tsx       # Overview
+│   │   │   ├── sites/          # Site management
+│   │   │   ├── analytics.tsx   # Analytics
+│   │   │   ├── reports.tsx     # Reports
+│   │   │   ├── users.tsx       # User management
+│   │   │   ├── blueprints.tsx  # Blueprint management
+│   │   │   ├── audit.tsx       # Audit trail
+│   │   │   └── billing.tsx     # Billing
+│   │   └── components/         # UI components
+│   └── package.json
+│
 ├── docs/                       # Documentation
 ├── tests/                      # Test files
-└── admin-dashboard/            # Admin UI (future)
+├── Dockerfile                  # Container config
+├── docker-compose.yml          # Local dev
+└── railway.toml                # Railway deployment
 ```
 
-## 🔌 API Endpoints
+## 🚀 Quick Start
 
-### WhatsApp Webhook
-- `POST /whatsapp/webhook` - Receive incoming messages
-- `POST /whatsapp/status` - Message delivery status
+### Prerequisites
 
-### Admin API
-- `POST /admin/builders` - Create builder/client
-- `POST /admin/projects` - Create project/site
-- `POST /admin/projects/{id}/blueprints` - Upload blueprints
-- `POST /admin/projects/{id}/engineers` - Add site engineers
-- `POST /admin/projects/{id}/memory` - Add project context
+- Python 3.11+
+- Node.js 18+
+- API Keys:
+  - [Google Gemini](https://aistudio.google.com/apikey)
+  - [Twilio](https://twilio.com)
+  - [Supabase](https://supabase.com)
 
-### Analytics
-- `GET /analytics/dashboard` - Overall statistics
-- `GET /analytics/projects/{id}` - Project analytics
-- `GET /analytics/usage/daily` - Daily usage data
+### Backend Setup
 
-### Health
-- `GET /health` - Service health check
-- `GET /ping` - Simple uptime check
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Configure
+cp .env.example .env
+# Edit .env with your keys
+
+# Run
+python main.py
+```
+
+### Dashboard Setup
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+### Test Everything
+
+```bash
+cd backend
+python prototype.py --test-all
+```
 
 ## ⚙️ Configuration
 
-Required environment variables:
+### Required Environment Variables
 
 ```env
 # Google Gemini (AI)
 GOOGLE_API_KEY=your-key
-
-# OpenAI (Voice Transcription)
-OPENAI_API_KEY=your-key
 
 # Twilio (WhatsApp)
 TWILIO_ACCOUNT_SID=your-sid
 TWILIO_AUTH_TOKEN=your-token
 TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
 
-# Database
-DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/sitemind
+# Supabase (Database + Storage)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-anon-key
+SUPABASE_SERVICE_KEY=your-service-key
+DATABASE_URL=postgresql+asyncpg://...@...supabase.co:5432/postgres
 
-# AWS S3 (File Storage)
-AWS_ACCESS_KEY_ID=your-key
-AWS_SECRET_ACCESS_KEY=your-secret
-AWS_S3_BUCKET=sitemind-blueprints
+# Optional: Supermemory.ai (Long-term memory)
+SUPERMEMORY_API_KEY=your-key
 ```
 
-## 🏛️ Architecture
+## 🔌 API Endpoints
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Site Engineer  │────▶│  WhatsApp API   │────▶│  SiteMind API   │
-│   (WhatsApp)    │◀────│    (Twilio)     │◀────│   (FastAPI)     │
-└─────────────────┘     └─────────────────┘     └────────┬────────┘
-                                                         │
-                        ┌────────────────────────────────┼────────────────────────────────┐
-                        │                                │                                │
-                        ▼                                ▼                                ▼
-                ┌───────────────┐              ┌─────────────────┐              ┌─────────────────┐
-                │  Gemini 2.0   │              │     Whisper     │              │   Supermemory   │
-                │ (Blueprint AI)│              │(Voice to Text)  │              │ (Long-term Mem) │
-                └───────────────┘              └─────────────────┘              └─────────────────┘
-```
+### WhatsApp
+- `POST /whatsapp/webhook` - Receive messages
+- `POST /whatsapp/status` - Delivery status
 
-## 💰 Business Model
+### Admin
+- `POST /admin/builders` - Create builder
+- `POST /admin/projects` - Create project/site
+- `POST /admin/projects/{id}/blueprints` - Upload blueprints
+- `POST /admin/projects/{id}/engineers` - Add engineers
 
-- **Price:** $500/site/month
-- **Target:** 600 sites = $300,000/month
-- **Market:** Large real estate developers in India
+### Analytics
+- `GET /analytics/dashboard` - Overview stats
+- `GET /analytics/projects/{id}` - Per-project data
+- `GET /analytics/roi/{builder_id}` - ROI breakdown
+
+### Health
+- `GET /health` - Service status
+- `GET /ping` - Uptime check
 
 ## 📈 Roadmap
 
-- [x] Core API with Gemini integration
-- [x] WhatsApp webhook handling
-- [x] Voice note transcription
-- [x] Blueprint upload and processing
-- [ ] Admin dashboard UI
+- [x] Core API with Gemini 2.5 Pro
+- [x] WhatsApp integration (Twilio)
+- [x] Blueprint analysis
+- [x] ROI tracking
+- [x] Audit trail with citations
+- [x] Auto-generated reports
+- [x] Company hierarchy (builder → sites)
+- [x] Volume pricing
+- [x] Web dashboard (Next.js)
+- [ ] Authentication (NextAuth)
+- [ ] Real-time updates (WebSocket)
 - [ ] Multi-language support
 - [ ] Conflict detection
 - [ ] Mobile app
@@ -181,15 +224,19 @@ AWS_S3_BUCKET=sitemind-blueprints
 ## 🛠️ Development
 
 ```bash
-# Run with auto-reload
+# Backend with auto-reload
+cd backend
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# Dashboard with HMR
+cd dashboard
+npm run dev
 
 # Run tests
 pytest tests/
 
 # Format code
 black backend/
-isort backend/
 ```
 
 ## 📄 License
@@ -198,9 +245,8 @@ Proprietary - All rights reserved
 
 ## 🤝 Contact
 
-Built with ❤️ for Indian construction industry
+Built with ❤️ for the Indian construction industry
 
 ---
 
 *"Preventing ₹10 Crore rework, one WhatsApp message at a time."*
-
