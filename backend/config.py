@@ -33,23 +33,18 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-pro"  # Best model - "thinking" capabilities
     gemini_pro_model: str = "gemini-2.5-pro"  # Same - always use the best
     
-    # OpenAI (Whisper)
-    openai_api_key: str = ""
-    whisper_model: str = "whisper-1"
-    
-    # Supermemory
+    # Supermemory (optional - falls back to in-memory)
     supermemory_api_key: str = ""
     
-    # Twilio
+    # Twilio (WhatsApp)
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_whatsapp_number: str = ""
     
-    # AWS S3
-    aws_access_key_id: str = ""
-    aws_secret_access_key: str = ""
-    aws_s3_bucket: str = "sitemind-blueprints"
-    aws_region: str = "ap-south-1"
+    # Supabase (Database + Storage - all in one!)
+    supabase_url: str = ""
+    supabase_key: str = ""  # anon/public key
+    supabase_service_key: str = ""  # service role key for admin ops
     
     # Sentry
     sentry_dsn: Optional[str] = None

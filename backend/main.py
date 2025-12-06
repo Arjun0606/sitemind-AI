@@ -20,7 +20,6 @@ from routers.whatsapp import router as whatsapp_router
 from routers.admin import router as admin_router
 from routers.analytics import router as analytics_router
 from services.gemini_service import gemini_service
-from services.whisper_service import whisper_service
 from services.whatsapp_client import whatsapp_client
 from services.memory_service import memory_service
 from services.storage_service import storage_service
@@ -50,11 +49,10 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Database initialization failed: {e}")
     
     # Log service status
-    logger.info(f"📊 Gemini Service: {'✅ Ready' if gemini_service.is_configured else '❌ Not configured'}")
-    logger.info(f"🎤 Whisper Service: {'✅ Ready' if whisper_service.is_configured else '❌ Not configured'}")
-    logger.info(f"💬 WhatsApp Service: {'✅ Ready' if whatsapp_client.is_configured else '❌ Not configured'}")
-    logger.info(f"🧠 Memory Service: {'✅ Ready' if memory_service.is_configured else '⚠️ Using fallback'}")
-    logger.info(f"📁 Storage Service: {'✅ Ready' if storage_service.is_configured else '❌ Not configured'}")
+    logger.info(f"🤖 Gemini 2.5 Pro: {'✅ Ready' if gemini_service.is_configured else '❌ Not configured'}")
+    logger.info(f"💬 WhatsApp: {'✅ Ready' if whatsapp_client.is_configured else '❌ Not configured'}")
+    logger.info(f"🧠 Memory: {'✅ Ready' if memory_service.is_configured else '⚠️ Using fallback'}")
+    logger.info(f"📁 Supabase Storage: {'✅ Ready' if storage_service.is_configured else '❌ Not configured'}")
     
     logger.info("🚀 SiteMind is ready to serve!")
     
@@ -93,8 +91,7 @@ app = FastAPI(
     
     ## Features
     
-    * 📐 **Blueprint Analysis** - Ask questions about any drawing
-    * 🎤 **Voice Notes** - Send voice messages for hands-free queries
+    * 📐 **Blueprint Analysis** - Ask questions about any drawing (Gemini 2.5 Pro)
     * 📷 **Site Photos** - Upload photos to verify against blueprints
     * 🧠 **Project Memory** - Remembers RFIs, change orders, and decisions
     
@@ -176,14 +173,12 @@ async def health_check():
     Returns status of all services
     """
     gemini_health = await gemini_service.health_check()
-    whisper_health = await whisper_service.health_check()
     whatsapp_health = await whatsapp_client.health_check()
     memory_health = await memory_service.health_check()
     storage_health = await storage_service.health_check()
     
     all_healthy = all([
         gemini_health.get("status") in ["healthy", "not_configured"],
-        whisper_health.get("status") in ["healthy", "not_configured"],
         whatsapp_health.get("status") in ["healthy", "not_configured"],
         memory_health.get("status") in ["healthy", "fallback"],
         storage_health.get("status") in ["healthy", "not_configured"],
@@ -192,9 +187,9 @@ async def health_check():
     return {
         "status": "healthy" if all_healthy else "degraded",
         "version": "1.0.0",
+        "stack": "Gemini 2.5 Pro + Supabase + Twilio",
         "services": {
             "gemini": gemini_health,
-            "whisper": whisper_health,
             "whatsapp": whatsapp_health,
             "memory": memory_health,
             "storage": storage_health,

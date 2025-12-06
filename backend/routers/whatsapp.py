@@ -17,7 +17,6 @@ from utils.helpers import extract_phone_number, calculate_cost
 from utils.database import get_async_session
 from models.database import Project, SiteEngineer, Blueprint, ChatLog
 from services.gemini_service import gemini_service
-from services.whisper_service import whisper_service
 from services.memory_service import memory_service
 from services.whatsapp_client import whatsapp_client
 
@@ -65,35 +64,20 @@ async def whatsapp_webhook(
         # Determine message type and extract content
         message_type = "text"
         user_message = Body or ""
-        transcription = None
         
-        # Handle voice notes
-        if int(NumMedia) > 0 and MediaContentType0 and "audio" in MediaContentType0:
-            message_type = "voice"
-            logger.info(f"Processing voice note: {MediaUrl0}")
-            
-            # Transcribe audio
-            transcription_result = await whisper_service.transcribe_audio(
-                audio_url=MediaUrl0,
-                content_type=MediaContentType0,
-            )
-            
-            if transcription_result.get("error"):
-                await whatsapp_client.send_message(
-                    to=user_phone,
-                    body="Sorry, I couldn't process your voice message. Please try again or send a text message."
-                )
-                return Response(content="", media_type="text/xml")
-            
-            transcription = transcription_result["transcription"]
-            user_message = transcription
-            logger.info(f"Transcription: {transcription}")
-        
-        # Handle images
-        elif int(NumMedia) > 0 and MediaContentType0 and "image" in MediaContentType0:
+        # Handle images (site photos)
+        if int(NumMedia) > 0 and MediaContentType0 and "image" in MediaContentType0:
             message_type = "image"
             if not Body:
                 user_message = "What can you tell me about this image?"
+        
+        # Handle voice notes - not supported, ask for text
+        elif int(NumMedia) > 0 and MediaContentType0 and "audio" in MediaContentType0:
+            await whatsapp_client.send_message(
+                to=user_phone,
+                body="🎤 Voice notes are not supported yet. Please type your question instead!"
+            )
+            return Response(content="", media_type="text/xml")
         
         # Check if message is empty
         if not user_message.strip():
@@ -158,7 +142,6 @@ async def whatsapp_webhook(
             user_name=ProfileName,
             message_type=message_type,
             user_message=Body or "",
-            transcription=transcription,
             media_url=MediaUrl0,
             bot_response=response_text,
             response_time_ms=total_time_ms,
@@ -260,7 +243,6 @@ async def _log_chat_interaction(
     user_name: Optional[str],
     message_type: str,
     user_message: str,
-    transcription: Optional[str],
     media_url: Optional[str],
     bot_response: str,
     response_time_ms: int,
@@ -277,7 +259,6 @@ async def _log_chat_interaction(
             user_name=user_name,
             message_type=message_type,
             user_message=user_message,
-            transcription=transcription,
             user_message_media_url=media_url,
             bot_response=bot_response,
             response_time_ms=response_time_ms,

@@ -24,12 +24,10 @@ SiteMind is an AI-powered assistant for construction site engineers in India. It
 ### Prerequisites
 
 - Python 3.11+
-- PostgreSQL 15+
 - API Keys for:
-  - Google Gemini
-  - OpenAI (Whisper)
-  - Twilio (WhatsApp)
-  - AWS S3
+  - Google Gemini (AI) - [aistudio.google.com](https://aistudio.google.com/apikey)
+  - Twilio (WhatsApp) - [twilio.com](https://twilio.com)
+  - Supabase (DB + Storage) - [supabase.com](https://supabase.com)
 
 ### Installation
 

@@ -5,8 +5,9 @@ Quick testing script to verify API integrations work correctly
 
 Usage:
     python prototype.py --test-gemini
-    python prototype.py --test-whisper
+    python prototype.py --test-storage
     python prototype.py --test-all
+    python prototype.py --demo
 """
 
 import asyncio
@@ -22,13 +23,14 @@ from utils.logger import setup_logging, logger
 
 
 async def test_gemini():
-    """Test Gemini API integration"""
-    print("\n🤖 Testing Gemini API...")
+    """Test Gemini 2.5 Pro API integration"""
+    print("\n🤖 Testing Gemini 2.5 Pro API...")
     
     from services.gemini_service import gemini_service
     
     if not gemini_service.is_configured:
         print("❌ Gemini not configured. Set GOOGLE_API_KEY in .env")
+        print("   Get your key at: https://aistudio.google.com/apikey")
         return False
     
     # Test simple query
@@ -41,31 +43,9 @@ async def test_gemini():
         print(f"❌ Gemini error: {result['error']}")
         return False
     
-    print(f"✅ Gemini response ({result['response_time_ms']}ms):")
+    print(f"✅ Gemini 2.5 Pro response ({result['response_time_ms']}ms):")
     print(f"   {result['response'][:200]}...")
     return True
-
-
-async def test_whisper():
-    """Test Whisper API integration"""
-    print("\n🎤 Testing Whisper API...")
-    
-    from services.whisper_service import whisper_service
-    
-    if not whisper_service.is_configured:
-        print("❌ Whisper not configured. Set OPENAI_API_KEY in .env")
-        return False
-    
-    # We can't easily test without an audio file
-    # Just verify the client is configured
-    health = await whisper_service.health_check()
-    
-    if health.get("status") == "healthy":
-        print(f"✅ Whisper service is healthy (model: {health.get('model')})")
-        return True
-    else:
-        print(f"❌ Whisper health check failed: {health}")
-        return False
 
 
 async def test_memory():
@@ -120,19 +100,20 @@ async def test_whatsapp():
 
 
 async def test_storage():
-    """Test Storage service"""
-    print("\n📁 Testing Storage Service...")
+    """Test Supabase Storage service"""
+    print("\n📁 Testing Supabase Storage...")
     
     from services.storage_service import storage_service
     
     if not storage_service.is_configured:
-        print("❌ Storage not configured. Set AWS_* credentials in .env")
+        print("❌ Supabase not configured. Set SUPABASE_* credentials in .env")
+        print("   Get your credentials at: https://supabase.com/dashboard")
         return False
     
     health = await storage_service.health_check()
     
     if health.get("status") == "healthy":
-        print(f"✅ Storage service healthy (bucket: {health.get('bucket')})")
+        print(f"✅ Supabase storage healthy (bucket: {health.get('bucket')})")
         return True
     else:
         print(f"❌ Storage health check failed: {health}")
@@ -144,13 +125,17 @@ async def run_all_tests():
     print("=" * 50)
     print("🏗️  SiteMind Integration Tests")
     print("=" * 50)
+    print("\nSimplified Stack:")
+    print("  • Gemini 2.5 Pro (AI)")
+    print("  • Supabase (Database + Storage)")
+    print("  • Twilio (WhatsApp)")
+    print()
     
     results = {
-        "Gemini": await test_gemini(),
-        "Whisper": await test_whisper(),
+        "Gemini 2.5 Pro": await test_gemini(),
         "Memory": await test_memory(),
         "WhatsApp": await test_whatsapp(),
-        "Storage": await test_storage(),
+        "Supabase Storage": await test_storage(),
     }
     
     print("\n" + "=" * 50)
@@ -180,6 +165,7 @@ async def interactive_demo():
     print("🏗️  SiteMind Interactive Demo")
     print("=" * 50)
     print("\nThis will simulate a conversation with SiteMind.")
+    print("Using Gemini 2.5 Pro for best-in-class responses.")
     print("Type 'quit' to exit.\n")
     
     from services.gemini_service import gemini_service
@@ -187,12 +173,13 @@ async def interactive_demo():
     
     if not gemini_service.is_configured:
         print("❌ Gemini not configured. Cannot run demo.")
+        print("   Get your API key at: https://aistudio.google.com/apikey")
         return
     
     # Add some demo context
     await memory_service.add_memory(
         project_id="demo-project",
-        content="Project: Skyline Towers Block A. 15-floor commercial building.",
+        content="Project: Skyline Towers Block A. 15-floor commercial building in Hyderabad.",
         metadata={"type": "project_info"},
     )
     await memory_service.add_memory(
@@ -205,8 +192,13 @@ async def interactive_demo():
         content="Column spacing on Grid A is 6 meters center-to-center.",
         metadata={"type": "structural", "drawing": "ST-02"},
     )
+    await memory_service.add_memory(
+        project_id="demo-project",
+        content="Foundation depth increased to 3.5m due to soil report findings.",
+        metadata={"type": "change_order", "drawing": "ST-01"},
+    )
     
-    print("📝 Demo context loaded (Skyline Towers Block A)")
+    print("📝 Demo context loaded (Skyline Towers Block A - Hyderabad)")
     print("-" * 50)
     
     while True:
@@ -242,11 +234,10 @@ async def interactive_demo():
 
 def main():
     parser = argparse.ArgumentParser(description="SiteMind Prototype Testing")
-    parser.add_argument("--test-gemini", action="store_true", help="Test Gemini API")
-    parser.add_argument("--test-whisper", action="store_true", help="Test Whisper API")
+    parser.add_argument("--test-gemini", action="store_true", help="Test Gemini 2.5 Pro API")
     parser.add_argument("--test-memory", action="store_true", help="Test Memory service")
     parser.add_argument("--test-whatsapp", action="store_true", help="Test WhatsApp client")
-    parser.add_argument("--test-storage", action="store_true", help="Test Storage service")
+    parser.add_argument("--test-storage", action="store_true", help="Test Supabase Storage")
     parser.add_argument("--test-all", action="store_true", help="Run all tests")
     parser.add_argument("--demo", action="store_true", help="Run interactive demo")
     
@@ -259,8 +250,6 @@ def main():
         asyncio.run(run_all_tests())
     elif args.test_gemini:
         asyncio.run(test_gemini())
-    elif args.test_whisper:
-        asyncio.run(test_whisper())
     elif args.test_memory:
         asyncio.run(test_memory())
     elif args.test_whatsapp:
@@ -277,4 +266,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

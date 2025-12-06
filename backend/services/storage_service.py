@@ -1,16 +1,15 @@
 """
 SiteMind Storage Service
-AWS S3 integration for blueprint and media file storage
+Supabase Storage integration for blueprint and media file storage
+Much simpler than AWS S3 for solo developers!
 """
 
 import time
 import asyncio
-import mimetypes
-from typing import Optional, Dict, Any, BinaryIO
+from typing import Optional, Dict, Any
 from pathlib import Path
-from datetime import datetime, timedelta
-import boto3
-from botocore.exceptions import ClientError
+from datetime import datetime
+import httpx
 
 from config import settings
 from utils.logger import logger
@@ -19,31 +18,41 @@ from utils.helpers import sanitize_filename, generate_unique_id
 
 class StorageService:
     """
-    AWS S3 Storage Service
-    Handles blueprint uploads, downloads, and pre-signed URLs
+    Supabase Storage Service
+    Handles blueprint uploads, downloads, and public URLs
+    
+    Supabase Storage is much simpler than S3:
+    - No complex IAM policies
+    - Built-in CDN
+    - Same dashboard as your database
     """
     
     # Allowed file types for blueprints
     ALLOWED_EXTENSIONS = {'.pdf', '.dwg', '.dxf', '.png', '.jpg', '.jpeg'}
-    MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB (Supabase free tier limit)
+    
+    BUCKET_NAME = "blueprints"
     
     def __init__(self):
-        """Initialize S3 storage service"""
-        if not settings.aws_access_key_id or not settings.aws_secret_access_key:
-            logger.warning("AWS credentials not configured")
+        """Initialize Supabase storage service"""
+        if not settings.supabase_url or not settings.supabase_service_key:
+            logger.warning("Supabase credentials not configured")
             self.is_configured = False
+            self.supabase = None
             return
         
-        self.s3_client = boto3.client(
-            's3',
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key,
-            region_name=settings.aws_region,
-        )
-        self.bucket = settings.aws_s3_bucket
-        self.is_configured = True
-        
-        logger.info(f"Storage service initialized with bucket: {self.bucket}")
+        try:
+            from supabase import create_client, Client
+            self.supabase: Client = create_client(
+                settings.supabase_url,
+                settings.supabase_service_key  # Use service key for storage admin
+            )
+            self.is_configured = True
+            logger.info("Supabase storage service initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Supabase: {e}")
+            self.is_configured = False
+            self.supabase = None
     
     async def upload_file(
         self,
@@ -53,7 +62,7 @@ class StorageService:
         category: str = "other",
     ) -> Dict[str, Any]:
         """
-        Upload a file to S3
+        Upload a file to Supabase Storage
         
         Args:
             file_content: File content as bytes
@@ -62,12 +71,12 @@ class StorageService:
             category: File category (architectural, structural, mep, etc.)
         
         Returns:
-            Dict with file_url, s3_key, file_size
+            Dict with file_url, storage_path, file_size
         """
         if not self.is_configured:
             return {
                 "file_url": None,
-                "s3_key": None,
+                "storage_path": None,
                 "error": "Storage service not configured"
             }
         
@@ -79,97 +88,61 @@ class StorageService:
             if ext not in self.ALLOWED_EXTENSIONS:
                 return {
                     "file_url": None,
-                    "s3_key": None,
+                    "storage_path": None,
                     "error": f"File type {ext} not allowed"
                 }
             
             if len(file_content) > self.MAX_FILE_SIZE:
                 return {
                     "file_url": None,
-                    "s3_key": None,
+                    "storage_path": None,
                     "error": f"File size exceeds {self.MAX_FILE_SIZE // 1024 // 1024}MB limit"
                 }
             
-            # Generate S3 key
+            # Generate storage path
             safe_filename = sanitize_filename(filename)
             unique_id = generate_unique_id()[:8]
-            s3_key = f"{project_id}/{category}/{unique_id}_{safe_filename}"
+            storage_path = f"{project_id}/{category}/{unique_id}_{safe_filename}"
             
             # Determine content type
-            content_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+            content_type = self._get_content_type(ext)
             
-            # Upload to S3
-            await asyncio.to_thread(
-                self.s3_client.put_object,
-                Bucket=self.bucket,
-                Key=s3_key,
-                Body=file_content,
-                ContentType=content_type,
-                Metadata={
-                    'project_id': project_id,
-                    'category': category,
-                    'original_filename': filename,
-                    'uploaded_at': datetime.utcnow().isoformat(),
-                }
+            # Upload to Supabase Storage
+            result = await asyncio.to_thread(
+                self.supabase.storage.from_(self.BUCKET_NAME).upload,
+                storage_path,
+                file_content,
+                {"content-type": content_type}
             )
             
-            # Generate the S3 URL
-            file_url = f"https://{self.bucket}.s3.{settings.aws_region}.amazonaws.com/{s3_key}"
+            # Get public URL
+            file_url = self.supabase.storage.from_(self.BUCKET_NAME).get_public_url(storage_path)
             
             elapsed_ms = int((time.time() - start_time) * 1000)
-            logger.info(f"File uploaded to S3: {s3_key} ({len(file_content)} bytes, {elapsed_ms}ms)")
+            logger.info(f"File uploaded to Supabase: {storage_path} ({len(file_content)} bytes, {elapsed_ms}ms)")
             
             return {
                 "file_url": file_url,
-                "s3_key": s3_key,
+                "storage_path": storage_path,
                 "file_size": len(file_content),
                 "content_type": content_type,
                 "response_time_ms": elapsed_ms,
             }
             
-        except ClientError as e:
-            logger.error(f"S3 upload error: {e}")
-            return {
-                "file_url": None,
-                "s3_key": None,
-                "error": str(e)
-            }
         except Exception as e:
-            logger.error(f"Upload failed: {e}")
+            logger.error(f"Supabase upload error: {e}")
             return {
                 "file_url": None,
-                "s3_key": None,
+                "storage_path": None,
                 "error": str(e)
             }
     
-    async def upload_file_object(
-        self,
-        file: BinaryIO,
-        filename: str,
-        project_id: str,
-        category: str = "other",
-    ) -> Dict[str, Any]:
+    async def download_file(self, storage_path: str) -> Optional[bytes]:
         """
-        Upload a file object to S3
+        Download a file from Supabase Storage
         
         Args:
-            file: File-like object
-            filename: Original filename
-            project_id: Project UUID
-            category: File category
-        
-        Returns:
-            Dict with upload result
-        """
-        content = file.read()
-        return await self.upload_file(content, filename, project_id, category)
-    
-    async def download_file(self, s3_key: str) -> Optional[bytes]:
-        """
-        Download a file from S3
-        
-        Args:
-            s3_key: S3 object key
+            storage_path: Path in storage bucket
         
         Returns:
             File content as bytes, or None if failed
@@ -178,55 +151,40 @@ class StorageService:
             return None
         
         try:
-            response = await asyncio.to_thread(
-                self.s3_client.get_object,
-                Bucket=self.bucket,
-                Key=s3_key,
+            result = await asyncio.to_thread(
+                self.supabase.storage.from_(self.BUCKET_NAME).download,
+                storage_path
             )
-            return response['Body'].read()
+            return result
         except Exception as e:
             logger.error(f"Failed to download file: {e}")
             return None
     
-    async def get_presigned_url(
-        self,
-        s3_key: str,
-        expiration: int = 3600,
-    ) -> Optional[str]:
+    async def get_public_url(self, storage_path: str) -> Optional[str]:
         """
-        Generate a pre-signed URL for temporary access
+        Get public URL for a file
         
         Args:
-            s3_key: S3 object key
-            expiration: URL expiration in seconds (default 1 hour)
+            storage_path: Path in storage bucket
         
         Returns:
-            Pre-signed URL or None if failed
+            Public URL or None
         """
         if not self.is_configured:
             return None
         
         try:
-            url = await asyncio.to_thread(
-                self.s3_client.generate_presigned_url,
-                'get_object',
-                Params={
-                    'Bucket': self.bucket,
-                    'Key': s3_key,
-                },
-                ExpiresIn=expiration,
-            )
-            return url
+            return self.supabase.storage.from_(self.BUCKET_NAME).get_public_url(storage_path)
         except Exception as e:
-            logger.error(f"Failed to generate presigned URL: {e}")
+            logger.error(f"Failed to get public URL: {e}")
             return None
     
-    async def delete_file(self, s3_key: str) -> bool:
+    async def delete_file(self, storage_path: str) -> bool:
         """
-        Delete a file from S3
+        Delete a file from Supabase Storage
         
         Args:
-            s3_key: S3 object key
+            storage_path: Path in storage bucket
         
         Returns:
             True if deleted, False otherwise
@@ -236,11 +194,10 @@ class StorageService:
         
         try:
             await asyncio.to_thread(
-                self.s3_client.delete_object,
-                Bucket=self.bucket,
-                Key=s3_key,
+                self.supabase.storage.from_(self.BUCKET_NAME).remove,
+                [storage_path]
             )
-            logger.info(f"File deleted from S3: {s3_key}")
+            logger.info(f"File deleted from Supabase: {storage_path}")
             return True
         except Exception as e:
             logger.error(f"Failed to delete file: {e}")
@@ -269,20 +226,21 @@ class StorageService:
             if category:
                 prefix = f"{project_id}/{category}/"
             
-            response = await asyncio.to_thread(
-                self.s3_client.list_objects_v2,
-                Bucket=self.bucket,
-                Prefix=prefix,
+            result = await asyncio.to_thread(
+                self.supabase.storage.from_(self.BUCKET_NAME).list,
+                prefix
             )
             
             files = []
-            for obj in response.get('Contents', []):
-                files.append({
-                    's3_key': obj['Key'],
-                    'size': obj['Size'],
-                    'last_modified': obj['LastModified'].isoformat(),
-                    'filename': Path(obj['Key']).name,
-                })
+            for item in result:
+                if item.get('name'):
+                    storage_path = f"{prefix}{item['name']}"
+                    files.append({
+                        'storage_path': storage_path,
+                        'name': item['name'],
+                        'size': item.get('metadata', {}).get('size', 0),
+                        'created_at': item.get('created_at'),
+                    })
             
             return files
             
@@ -290,39 +248,56 @@ class StorageService:
             logger.error(f"Failed to list files: {e}")
             return []
     
-    async def file_exists(self, s3_key: str) -> bool:
-        """Check if a file exists in S3"""
+    def _get_content_type(self, ext: str) -> str:
+        """Get MIME type from extension"""
+        mapping = {
+            '.pdf': 'application/pdf',
+            '.dwg': 'application/acad',
+            '.dxf': 'application/dxf',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+        }
+        return mapping.get(ext, 'application/octet-stream')
+    
+    async def ensure_bucket_exists(self) -> bool:
+        """
+        Ensure the blueprints bucket exists (call on startup)
+        """
         if not self.is_configured:
             return False
         
         try:
+            # Try to create bucket (will fail silently if exists)
             await asyncio.to_thread(
-                self.s3_client.head_object,
-                Bucket=self.bucket,
-                Key=s3_key,
+                self.supabase.storage.create_bucket,
+                self.BUCKET_NAME,
+                {"public": True}  # Public bucket for blueprint access
             )
+            logger.info(f"Storage bucket '{self.BUCKET_NAME}' ready")
             return True
-        except ClientError as e:
-            if e.response['Error']['Code'] == '404':
-                return False
-            logger.error(f"Error checking file: {e}")
+        except Exception as e:
+            # Bucket might already exist, that's fine
+            if "already exists" in str(e).lower():
+                logger.info(f"Storage bucket '{self.BUCKET_NAME}' already exists")
+                return True
+            logger.error(f"Failed to create bucket: {e}")
             return False
     
     async def health_check(self) -> Dict[str, Any]:
         """Check if storage service is healthy"""
         if not self.is_configured:
-            return {"status": "not_configured", "error": "AWS credentials not set"}
+            return {"status": "not_configured", "error": "Supabase credentials not set"}
         
         try:
-            # Try to list bucket (head_bucket)
-            await asyncio.to_thread(
-                self.s3_client.head_bucket,
-                Bucket=self.bucket,
+            # Try to list buckets
+            buckets = await asyncio.to_thread(
+                self.supabase.storage.list_buckets
             )
             return {
                 "status": "healthy",
-                "bucket": self.bucket,
-                "region": settings.aws_region,
+                "provider": "supabase",
+                "bucket": self.BUCKET_NAME,
             }
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
@@ -330,4 +305,3 @@ class StorageService:
 
 # Singleton instance
 storage_service = StorageService()
-
