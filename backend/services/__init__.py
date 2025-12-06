@@ -17,6 +17,7 @@ from services.storage_service import StorageService
 from services.roi_service import ROIService
 from services.report_service import ReportService
 from services.subscription_service import SubscriptionService
+from services.pricing_service import PricingService
 
 __all__ = [
     "GeminiService",
@@ -26,5 +27,6 @@ __all__ = [
     "ROIService",
     "ReportService",
     "SubscriptionService",
+    "PricingService",
 ]
 
