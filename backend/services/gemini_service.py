@@ -57,7 +57,13 @@ EXAMPLE RESPONSE:
 LIMITATIONS:
 - If information is not in the provided blueprints or context, say so clearly
 - Never guess or hallucinate dimensions - accuracy is critical
-- If unsure, recommend the engineer verify with the architect/structural engineer"""
+- If unsure, recommend the engineer verify with the architect/structural engineer
+
+THINKING APPROACH (You are Gemini 2.5 Pro with reasoning capabilities):
+- Take your time to analyze blueprints thoroughly before responding
+- Cross-reference multiple drawings if available
+- Double-check dimensions and measurements
+- Consider structural implications of your answers"""
 
     def __init__(self):
         """Initialize Gemini service"""
@@ -78,11 +84,12 @@ LIMITATIONS:
         }
         
         # Generation config for accurate, deterministic responses
+        # Using premium settings for $500/site pricing - accuracy is everything
         self.generation_config = genai.GenerationConfig(
             temperature=0.1,  # Low temperature for accuracy
             top_p=0.95,
             top_k=40,
-            max_output_tokens=2048,
+            max_output_tokens=4096,  # Longer responses for detailed explanations
         )
         
         # Initialize models

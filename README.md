@@ -10,10 +10,12 @@
 
 SiteMind is an AI-powered assistant for construction site engineers in India. It lives in WhatsApp and can:
 
-- 📐 **Read Blueprints** - Instantly answer questions about any drawing
+- 📐 **Read Blueprints** - Powered by Gemini 2.5 Pro (best-in-class AI)
 - 🎤 **Understand Voice** - Send voice notes while on scaffolding
 - 📷 **Analyze Photos** - Upload site photos to verify against blueprints
 - 🧠 **Remember Everything** - Recalls RFIs, change orders, and past decisions
+
+**Premium AI Stack:** At $500/site, we use the absolute best models - Gemini 2.5 Pro with reasoning capabilities for maximum accuracy on critical construction data.
 
 **Problem Solved:** Indian construction projects lose 6-15% of project value to rework. SiteMind prevents costly errors by giving engineers instant, accurate information.
 

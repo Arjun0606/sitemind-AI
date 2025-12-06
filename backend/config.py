@@ -28,10 +28,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/sitemind"
     database_sync_url: str = "postgresql://postgres:password@localhost:5432/sitemind"
     
-    # Google Gemini
+    # Google Gemini - Using the BEST models at $500/site pricing
     google_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"  # Fast model for quick queries
-    gemini_pro_model: str = "gemini-1.5-pro"  # Pro model for complex queries
+    gemini_model: str = "gemini-2.5-pro"  # Best model - "thinking" capabilities
+    gemini_pro_model: str = "gemini-2.5-pro"  # Same - always use the best
     
     # OpenAI (Whisper)
     openai_api_key: str = ""
