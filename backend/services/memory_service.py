@@ -200,7 +200,7 @@ class MemoryService:
         }
     
     def _format_context(self, results: List[Dict[str, Any]]) -> str:
-        """Format search results into a context string for the AI"""
+        """Format search results into a context string for the AI with full audit trail"""
         if not results:
             return ""
         
@@ -209,20 +209,53 @@ class MemoryService:
             content = result.get("content", "")
             metadata = result.get("metadata", {})
             
-            # Build context entry
+            # Build context entry with full audit trail
             entry = f"[{i}] {content}"
             
-            # Add metadata if available
+            # Add comprehensive metadata for citations and proof
             if metadata:
                 meta_parts = []
+                
+                # Document type
                 if metadata.get("type"):
-                    meta_parts.append(f"Type: {metadata['type']}")
-                if metadata.get("date"):
-                    meta_parts.append(f"Date: {metadata['date']}")
+                    meta_parts.append(f"📋 Type: {metadata['type'].upper()}")
+                
+                # Drawing reference (critical for citations)
                 if metadata.get("drawing"):
-                    meta_parts.append(f"Drawing: {metadata['drawing']}")
+                    meta_parts.append(f"📐 Drawing: {metadata['drawing']}")
+                
+                # Date of decision/change
+                if metadata.get("date"):
+                    meta_parts.append(f"📅 Date: {metadata['date']}")
+                
+                # WHO made the decision (audit trail)
+                if metadata.get("approved_by"):
+                    meta_parts.append(f"✅ Approved by: {metadata['approved_by']}")
+                
+                if metadata.get("requested_by"):
+                    meta_parts.append(f"📝 Requested by: {metadata['requested_by']}")
+                
+                # WHY the decision was made (critical for disputes)
+                if metadata.get("reason"):
+                    meta_parts.append(f"💡 Reason: {metadata['reason']}")
+                
+                # Previous value (before change)
+                if metadata.get("previous_value"):
+                    meta_parts.append(f"⬅️ Previous: {metadata['previous_value']}")
+                
+                # New value (after change)
+                if metadata.get("new_value"):
+                    meta_parts.append(f"➡️ New: {metadata['new_value']}")
+                
+                # RFI/Change Order number
+                if metadata.get("rfi_number"):
+                    meta_parts.append(f"🔢 RFI#: {metadata['rfi_number']}")
+                
+                if metadata.get("change_order_number"):
+                    meta_parts.append(f"🔢 CO#: {metadata['change_order_number']}")
+                
                 if meta_parts:
-                    entry += f"\n   ({', '.join(meta_parts)})"
+                    entry += f"\n   ({' | '.join(meta_parts)})"
             
             context_parts.append(entry)
         
@@ -242,7 +275,15 @@ class MemoryService:
             project_id: Project identifier
             content: Document content
             doc_type: Type of document (rfi, change_order, meeting_notes, etc.)
-            metadata: Additional metadata
+            metadata: Additional metadata including:
+                - drawing: Drawing reference (e.g., "ST-04")
+                - approved_by: Who approved this decision
+                - requested_by: Who requested this change
+                - reason: Why this decision was made
+                - previous_value: Old specification
+                - new_value: New specification
+                - rfi_number: RFI reference number
+                - change_order_number: CO reference number
         
         Returns:
             Dict with document_id and status
@@ -257,6 +298,90 @@ class MemoryService:
             project_id=project_id,
             content=content,
             metadata=full_metadata,
+        )
+    
+    async def add_change_order(
+        self,
+        project_id: str,
+        description: str,
+        drawing: str,
+        previous_value: str,
+        new_value: str,
+        reason: str,
+        approved_by: str,
+        requested_by: Optional[str] = None,
+        change_order_number: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add a change order with full audit trail
+        This creates a complete record for dispute resolution
+        
+        Example:
+            await memory.add_change_order(
+                project_id="abc123",
+                description="Beam B2 depth increased",
+                drawing="ST-04",
+                previous_value="300x450mm",
+                new_value="300x600mm",
+                reason="HVAC duct clash - duct routing requires additional clearance",
+                approved_by="Structural Engineer - Rajesh Kumar",
+                requested_by="MEP Consultant - ABC Associates",
+                change_order_number="CO-2025-047"
+            )
+        """
+        content = f"CHANGE ORDER: {description}. Changed from {previous_value} to {new_value}. Reason: {reason}"
+        
+        return await self.add_document(
+            project_id=project_id,
+            content=content,
+            doc_type="change_order",
+            metadata={
+                "drawing": drawing,
+                "previous_value": previous_value,
+                "new_value": new_value,
+                "reason": reason,
+                "approved_by": approved_by,
+                "requested_by": requested_by,
+                "change_order_number": change_order_number,
+            }
+        )
+    
+    async def add_rfi(
+        self,
+        project_id: str,
+        question: str,
+        answer: str,
+        drawing: str,
+        answered_by: str,
+        asked_by: Optional[str] = None,
+        rfi_number: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add an RFI (Request for Information) with full audit trail
+        
+        Example:
+            await memory.add_rfi(
+                project_id="abc123",
+                question="What is the rebar spacing for slab S3?",
+                answer="150mm c/c both ways, Fe500 grade",
+                drawing="ST-12",
+                answered_by="Structural Consultant",
+                asked_by="Site Engineer - Arun",
+                rfi_number="RFI-2025-089"
+            )
+        """
+        content = f"RFI: Q: {question} | A: {answer}"
+        
+        return await self.add_document(
+            project_id=project_id,
+            content=content,
+            doc_type="rfi",
+            metadata={
+                "drawing": drawing,
+                "answered_by": answered_by,
+                "asked_by": asked_by,
+                "rfi_number": rfi_number,
+            }
         )
     
     async def get_project_memories(
