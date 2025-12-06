@@ -5,8 +5,8 @@ Simple, transparent pricing. One product, one price.
 Philosophy:
 - One product with EVERYTHING included
 - No confusing tiers
-- Usage-based upsell for heavy users (query tokens)
-- Volume discounts for large builders
+- No token/query limits - UNLIMITED usage
+- Volume discounts for multiple sites
 - Founding partner program for pilots
 """
 
@@ -19,30 +19,19 @@ class PricingConfig:
     """
     SiteMind Pricing Configuration
     
-    Base: ₹25,000/site/month (~$300)
-    Includes 500 queries/month
-    Everything else unlimited
+    Base: $500/site/month (₹41,500)
+    UNLIMITED queries - no limits, no upsells
     """
     
-    # Base pricing (INR)
-    BASE_PRICE_INR = 25_000
-    BASE_PRICE_USD = 300
+    # Base pricing
+    BASE_PRICE_USD = 500
+    BASE_PRICE_INR = 41_500  # ~$500 at 83 INR/USD
     
-    # Included queries per month
-    INCLUDED_QUERIES = 500
-    
-    # Query packs for heavy users
-    QUERY_PACKS = {
-        "standard": {"queries": 500, "price_inr": 5_000, "price_usd": 60},
-        "heavy": {"queries": 1500, "price_inr": 12_000, "price_usd": 145},
-        "unlimited": {"queries": float('inf'), "price_inr": 15_000, "price_usd": 180, "recurring": True},
-    }
-    
-    # Volume discounts
+    # Volume discounts (simple tiers)
     VOLUME_DISCOUNTS = {
-        10: 0.10,   # 10% off for 10+ sites
-        25: 0.20,   # 20% off for 25+ sites
-        50: 0.25,   # 25% off for 50+ sites
+        3: 0.10,    # 10% off for 3+ sites
+        6: 0.15,    # 15% off for 6+ sites
+        10: 0.25,   # 25% off for 10+ sites
     }
     
     # Founding partner discount (forever)
@@ -64,6 +53,13 @@ class PilotStatus(str, Enum):
 class PricingService:
     """
     Handles all pricing calculations and pilot program management
+    
+    Simple pricing:
+    - $500/site/month
+    - 3+ sites: 10% off
+    - 6+ sites: 15% off  
+    - 10+ sites: 25% off
+    - Unlimited usage, no query limits
     """
     
     def __init__(self):
@@ -75,7 +71,7 @@ class PricingService:
         self,
         num_sites: int,
         is_founding_partner: bool = False,
-        currency: str = "INR"
+        currency: str = "USD"
     ) -> Dict[str, Any]:
         """
         Calculate price for a given number of sites
@@ -83,70 +79,115 @@ class PricingService:
         Args:
             num_sites: Number of sites
             is_founding_partner: Whether they're a founding partner (20% off forever)
-            currency: INR or USD
+            currency: USD or INR
         """
-        base_price = self.config.BASE_PRICE_INR if currency == "INR" else self.config.BASE_PRICE_USD
+        base_price = self.config.BASE_PRICE_USD if currency == "USD" else self.config.BASE_PRICE_INR
         
         # Apply volume discount
         volume_discount = 0
+        volume_tier = None
         for threshold, discount in sorted(self.config.VOLUME_DISCOUNTS.items(), reverse=True):
             if num_sites >= threshold:
                 volume_discount = discount
+                volume_tier = threshold
                 break
         
-        # Apply founding partner discount
-        founding_discount = self.config.FOUNDING_PARTNER_DISCOUNT if is_founding_partner else 0
-        
-        # Total discount (volume + founding don't stack, take the better one)
-        total_discount = max(volume_discount, founding_discount)
+        # Apply founding partner discount (stacks with volume for founding partners)
+        if is_founding_partner:
+            # Founding partners get the BETTER of volume or founding discount
+            founding_discount = self.config.FOUNDING_PARTNER_DISCOUNT
+            if founding_discount > volume_discount:
+                total_discount = founding_discount
+                discount_reason = "founding_partner"
+            else:
+                total_discount = volume_discount
+                discount_reason = f"volume_{volume_tier}+_sites"
+        else:
+            total_discount = volume_discount
+            discount_reason = f"volume_{volume_tier}+_sites" if volume_tier else "none"
         
         # Calculate prices
         price_per_site = base_price * (1 - total_discount)
         total_monthly = price_per_site * num_sites
         total_annual = total_monthly * 12
         
+        # Savings calculation
+        savings_per_site = base_price - price_per_site
+        total_savings_monthly = savings_per_site * num_sites
+        
         # Format currency
-        symbol = "₹" if currency == "INR" else "$"
+        symbol = "$" if currency == "USD" else "₹"
         
         return {
             "num_sites": num_sites,
             "currency": currency,
             "base_price_per_site": base_price,
-            "discount_applied": f"{total_discount * 100:.0f}%",
-            "discount_reason": "founding_partner" if founding_discount > volume_discount else f"volume_{num_sites}_sites",
+            "base_price_formatted": f"{symbol}{base_price:,.0f}",
+            "discount_percent": total_discount * 100,
+            "discount_applied": f"{total_discount * 100:.0f}%" if total_discount > 0 else "None",
+            "discount_reason": discount_reason,
             "price_per_site": price_per_site,
             "price_per_site_formatted": f"{symbol}{price_per_site:,.0f}",
             "total_monthly": total_monthly,
             "total_monthly_formatted": f"{symbol}{total_monthly:,.0f}",
             "total_annual": total_annual,
             "total_annual_formatted": f"{symbol}{total_annual:,.0f}",
-            "included_queries_per_site": self.config.INCLUDED_QUERIES,
-            "total_included_queries": self.config.INCLUDED_QUERIES * num_sites,
+            "savings_per_site": savings_per_site,
+            "savings_per_site_formatted": f"{symbol}{savings_per_site:,.0f}" if savings_per_site > 0 else "N/A",
+            "total_savings_monthly": total_savings_monthly,
+            "total_savings_formatted": f"{symbol}{total_savings_monthly:,.0f}/month" if total_savings_monthly > 0 else "N/A",
+            "usage": "UNLIMITED - No query limits",
         }
     
-    def get_query_pack_options(self, currency: str = "INR") -> Dict[str, Any]:
+    def get_pricing_table(self, currency: str = "USD") -> Dict[str, Any]:
         """
-        Get available query pack options for upsell
+        Get the complete pricing table for display
         """
-        symbol = "₹" if currency == "INR" else "$"
-        price_key = "price_inr" if currency == "INR" else "price_usd"
-        
-        packs = {}
-        for name, details in self.config.QUERY_PACKS.items():
-            queries = details["queries"]
-            price = details[price_key]
-            packs[name] = {
-                "queries": "Unlimited" if queries == float('inf') else queries,
-                "price": price,
-                "price_formatted": f"{symbol}{price:,.0f}",
-                "recurring": details.get("recurring", False),
-                "cost_per_query": None if queries == float('inf') else f"{symbol}{price/queries:.1f}",
-            }
+        symbol = "$" if currency == "USD" else "₹"
+        base = self.config.BASE_PRICE_USD if currency == "USD" else self.config.BASE_PRICE_INR
         
         return {
-            "included_free": self.config.INCLUDED_QUERIES,
-            "packs": packs,
-            "note": "Most sites use 200-400 queries/month. Packs are for power users only.",
+            "base_price": f"{symbol}{base:,.0f}/site/month",
+            "volume_discounts": [
+                {
+                    "sites": "1-2 sites",
+                    "discount": "0%",
+                    "price_per_site": f"{symbol}{base:,.0f}",
+                },
+                {
+                    "sites": "3-5 sites",
+                    "discount": "10%",
+                    "price_per_site": f"{symbol}{base * 0.90:,.0f}",
+                },
+                {
+                    "sites": "6-9 sites",
+                    "discount": "15%",
+                    "price_per_site": f"{symbol}{base * 0.85:,.0f}",
+                },
+                {
+                    "sites": "10+ sites",
+                    "discount": "25%",
+                    "price_per_site": f"{symbol}{base * 0.75:,.0f}",
+                },
+            ],
+            "whats_included": [
+                "✅ UNLIMITED AI queries",
+                "✅ Unlimited engineers per site",
+                "✅ Blueprint analysis (Gemini 2.5 Pro)",
+                "✅ Site photo verification",
+                "✅ Complete audit trail with citations",
+                "✅ Weekly & monthly reports",
+                "✅ Conflict detection",
+                "✅ ROI dashboard",
+                "✅ WhatsApp support",
+                "✅ No hidden fees, no query limits",
+            ],
+            "terms": [
+                "Monthly billing, cancel anytime",
+                "Each site = separate subscription",
+                "Volume discounts applied automatically",
+                "Annual billing available (2 months free)",
+            ],
         }
     
     def create_pilot(
@@ -183,6 +224,10 @@ class PricingService:
         start_date = datetime.utcnow()
         end_date = start_date + timedelta(days=90)  # 3 months
         
+        # Calculate pilot value
+        pilot_value_usd = self.config.BASE_PRICE_USD * len(sites) * 3
+        pilot_value_inr = self.config.BASE_PRICE_INR * len(sites) * 3
+        
         pilot = {
             "pilot_id": pilot_id,
             "builder_id": builder_id,
@@ -194,12 +239,16 @@ class PricingService:
             "status": PilotStatus.ACTIVE,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
+            "pilot_value_usd": f"${pilot_value_usd:,}",
+            "pilot_value_inr": f"₹{pilot_value_inr:,}",
             "founding_partner_discount": "20% forever after pilot",
-            "pilot_value": f"₹{self.config.BASE_PRICE_INR * len(sites) * 3:,.0f} (3 months free)",
         }
         
         self._pilot_partners[builder_id] = pilot
         self._pilots_used += 1
+        
+        # Calculate post-pilot pricing
+        post_pilot_pricing = self.get_price(len(sites), is_founding_partner=True)
         
         return {
             "success": True,
@@ -208,7 +257,7 @@ class PricingService:
             "what_you_get": [
                 f"✅ Full SiteMind access for {len(sites)} sites",
                 "✅ 3 months completely FREE",
-                "✅ Unlimited queries during pilot",
+                "✅ UNLIMITED queries - no limits",
                 "✅ Direct WhatsApp access to founder",
                 "✅ 20% discount forever after pilot",
             ],
@@ -217,7 +266,12 @@ class PricingService:
                 "📸 Permission to use as case study (optional)",
                 "🤝 Honest review after pilot",
             ],
-            "after_pilot": self.get_price(len(sites), is_founding_partner=True),
+            "pilot_value": f"${pilot_value_usd:,} ({pilot_value_inr:,} INR) - FREE for you",
+            "after_pilot": {
+                "price_per_site": post_pilot_pricing["price_per_site_formatted"],
+                "total_monthly": post_pilot_pricing["total_monthly_formatted"],
+                "discount": "20% founding partner discount (forever)",
+            },
             "slots_remaining": self.config.PILOT_SLOTS_TOTAL - self._pilots_used,
         }
     
@@ -245,11 +299,20 @@ class PricingService:
         builder_name: str,
         num_sites: int,
         is_founding_partner: bool = False,
+        currency: str = "USD",
     ) -> str:
         """
         Generate a shareable quote for a builder
         """
-        pricing = self.get_price(num_sites, is_founding_partner)
+        pricing = self.get_price(num_sites, is_founding_partner, currency)
+        symbol = "$" if currency == "USD" else "₹"
+        
+        discount_line = ""
+        if pricing["discount_percent"] > 0:
+            discount_line = f"""
+Discount: {pricing['discount_applied']} ({pricing['discount_reason']})
+You Save: {pricing['total_savings_formatted']}
+"""
         
         quote = f"""
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -260,38 +323,49 @@ Prepared for: {builder_name}
 Date: {datetime.utcnow().strftime("%d %B %Y")}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SUBSCRIPTION DETAILS
+PRICING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Sites: {num_sites}
+Base Price: {pricing['base_price_formatted']}/site/month
+{discount_line}
 Price per site: {pricing['price_per_site_formatted']}/month
-Discount: {pricing['discount_applied']}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 MONTHLY TOTAL: {pricing['total_monthly_formatted']}
 ANNUAL TOTAL: {pricing['total_annual_formatted']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WHAT'S INCLUDED (per site)
+WHAT'S INCLUDED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-✅ {pricing['included_queries_per_site']} AI queries/month
-✅ Unlimited engineers
-✅ Blueprint analysis
-✅ Site photo verification  
-✅ Complete audit trail
+✅ UNLIMITED AI queries (no limits!)
+✅ Unlimited engineers per site
+✅ Blueprint analysis (Gemini 2.5 Pro)
+✅ Site photo verification
+✅ Complete audit trail with citations
 ✅ Weekly & monthly reports
 ✅ Conflict detection
 ✅ ROI dashboard
 ✅ WhatsApp support
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VOLUME DISCOUNTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3+ sites:  10% off
+6+ sites:  15% off
+10+ sites: 25% off
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TERMS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 • Monthly billing, cancel anytime
-• Each site = separate subscription
-• Query packs available if needed
-• Volume discounts applied automatically
+• Each construction site = 1 subscription
+• No hidden fees, no query limits
+• Annual billing: 2 months free
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -304,4 +378,3 @@ Questions? WhatsApp: +91-XXXXXXXXXX
 
 # Singleton instance
 pricing_service = PricingService()
-
