@@ -13,6 +13,10 @@ BUSINESS SERVICES:
 - Automated Reports (Weekly/Monthly)
 - Pricing (Active sites + Archive upsell)
 - Project Lifecycle (Onboarding → Archive)
+
+ENGAGEMENT (Make it ADDICTIVE):
+- Smart Assistant (Language, typos, context)
+- Engagement Service (Streaks, milestones, summaries)
 """
 
 from services.gemini_service import GeminiService
@@ -24,6 +28,8 @@ from services.report_service import ReportService
 from services.subscription_service import SubscriptionService
 from services.pricing_service import PricingService
 from services.project_lifecycle import ProjectLifecycleService
+from services.smart_assistant import SmartAssistant
+from services.engagement_service import EngagementService
 
 __all__ = [
     "GeminiService",
@@ -35,4 +41,6 @@ __all__ = [
     "SubscriptionService",
     "PricingService",
     "ProjectLifecycleService",
+    "SmartAssistant",
+    "EngagementService",
 ]

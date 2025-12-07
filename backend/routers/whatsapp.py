@@ -33,6 +33,8 @@ from services.gemini_service import gemini_service
 from services.memory_service import memory_service
 from services.whatsapp_client import whatsapp_client
 from services.storage_service import storage_service
+from services.smart_assistant import smart_assistant
+from services.engagement_service import engagement_service
 
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
@@ -490,28 +492,95 @@ async def _handle_query(
     
     Engineer asks: "Beam size at B2 3rd floor?"
     → Search memory + blueprints, answer with citations
+    
+    SMART FEATURES:
+    - Hindi/English code switching
+    - Typo correction
+    - Follow-up question handling
+    - Ambiguity detection
+    - Urgency detection
     """
     try:
+        # Normalize query (handle Hindi, typos, etc.)
+        normalized_query, query_meta = smart_assistant.normalize_query(message)
+        
+        # Check if this is a follow-up question
+        is_followup, followup_context = smart_assistant.is_followup_query(user_phone, message)
+        
+        # Check for ambiguity - need clarification?
+        if query_meta["needs_clarification"] and not is_followup:
+            clarification = smart_assistant.generate_clarification(message, query_meta["ambiguities"])
+            if clarification:
+                return clarification
+        
+        # Check for out of scope
+        if query_meta["category"] == "out_of_scope":
+            return smart_assistant.handle_out_of_scope(message)
+        
+        # Build enhanced query with context
+        enhanced_query = message
+        if is_followup and followup_context:
+            enhanced_query = f"{followup_context}\n\nNew question: {message}"
+        
         # Get relevant memory context
         memory_result = await memory_service.search_memory(
             project_id=str(project.id),
-            query=message,
+            query=normalized_query,
             limit=10,
         )
         memory_context = memory_result.get("context", "")
         
+        # Check for conflicts in memory
+        conflict_warning = smart_assistant.check_for_conflicts(
+            normalized_query, 
+            memory_result.get("results", [])
+        )
+        
         # Get project blueprints
         blueprint_ids = await _get_project_blueprint_ids(db, project.id)
         
+        # Determine thinking level based on urgency
+        thinking_level = "low" if query_meta["urgency"] == "critical" else "high"
+        
         # Query Gemini
         ai_result = await gemini_service.analyze_query(
-            query=message,
+            query=enhanced_query,
             blueprint_ids=blueprint_ids,
             memory_context=memory_context,
-            thinking_level="high",
+            thinking_level=thinking_level,
         )
         
         response = ai_result.get("response", "I couldn't find an answer. Please try rephrasing your question.")
+        
+        # Add conflict warning if any
+        if conflict_warning:
+            response = conflict_warning + "\n\n" + response
+        
+        # Enhance response based on context
+        user_stats = smart_assistant.get_user_stats(user_phone)
+        response = smart_assistant.enhance_response(
+            response, 
+            query_meta["urgency"],
+            query_meta["category"],
+            user_stats
+        )
+        
+        # Update conversation context
+        smart_assistant.update_context(
+            user_phone, message, response,
+            topic=str(query_meta["category"]),
+        )
+        
+        # Track engagement
+        issue_detected = "⚠️" in response or "ISSUE" in response.upper()
+        engagement_service.track_query(
+            project_id=str(project.id),
+            user_phone=user_phone,
+            user_name=user_name or "Unknown",
+            query=message,
+            response=response,
+            issue_detected=issue_detected,
+        )
         
         # Store Q&A for future context
         background_tasks.add_task(
