@@ -1,515 +1,384 @@
 """
-SiteMind Admin Router
-Admin endpoints for managing builders, projects, blueprints, and site engineers
+SiteMind Admin API
+Endpoints for customer onboarding and management
+
+All customization happens through API - no code changes needed for customers.
 """
 
-import time
-from typing import Optional, List
-from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
-from sqlalchemy.orm import selectinload
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any
 
-from config import settings
+from services.onboarding_service import onboarding_service, OnboardingStatus
+from services.config_service import config_service
 from utils.logger import logger
-from utils.database import get_async_session
-from models.database import Builder, Project, Blueprint, SiteEngineer, ChatLog
-from models.schemas import (
-    BuilderCreate, BuilderUpdate, BuilderResponse,
-    ProjectCreate, ProjectUpdate, ProjectResponse,
-    BlueprintCreate, BlueprintResponse,
-    SiteEngineerCreate, SiteEngineerResponse,
-)
-from services.storage_service import storage_service
-from services.gemini_service import gemini_service
-from services.memory_service import memory_service
-from services.whatsapp_client import whatsapp_client
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
-# ===========================================
-# Builder Endpoints
-# ===========================================
+# =============================================================================
+# REQUEST/RESPONSE MODELS
+# =============================================================================
 
-@router.post("/builders", response_model=BuilderResponse)
-async def create_builder(
-    builder: BuilderCreate,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Create a new builder/client"""
-    db_builder = Builder(**builder.model_dump())
-    db.add(db_builder)
-    await db.commit()
-    await db.refresh(db_builder)
-    
-    logger.info(f"Builder created: {db_builder.name} ({db_builder.id})")
-    return db_builder
+class StartOnboardingRequest(BaseModel):
+    customer_name: str
+    contact_email: str
+    contact_phone: str
+    plan: str = "pilot"
 
 
-@router.get("/builders", response_model=List[BuilderResponse])
-async def list_builders(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """List all builders"""
-    result = await db.execute(
-        select(Builder)
-        .order_by(Builder.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-    )
-    return result.scalars().all()
+class CreateOrganizationRequest(BaseModel):
+    session_id: str
+    name: str
+    slug: Optional[str] = None
+    billing_email: Optional[str] = None
+    settings: Optional[Dict[str, Any]] = None
 
 
-@router.get("/builders/{builder_id}", response_model=BuilderResponse)
-async def get_builder(
-    builder_id: UUID,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Get a specific builder"""
-    result = await db.execute(
-        select(Builder).where(Builder.id == builder_id)
-    )
-    builder = result.scalar_one_or_none()
-    
-    if not builder:
-        raise HTTPException(status_code=404, detail="Builder not found")
-    
-    return builder
+class CreateAdminUserRequest(BaseModel):
+    session_id: str
+    name: str
+    email: str
+    phone: str
 
 
-@router.patch("/builders/{builder_id}", response_model=BuilderResponse)
-async def update_builder(
-    builder_id: UUID,
-    builder_update: BuilderUpdate,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Update a builder"""
-    result = await db.execute(
-        select(Builder).where(Builder.id == builder_id)
-    )
-    builder = result.scalar_one_or_none()
-    
-    if not builder:
-        raise HTTPException(status_code=404, detail="Builder not found")
-    
-    for field, value in builder_update.model_dump(exclude_unset=True).items():
-        setattr(builder, field, value)
-    
-    await db.commit()
-    await db.refresh(builder)
-    
-    logger.info(f"Builder updated: {builder.name}")
-    return builder
+class CreateProjectRequest(BaseModel):
+    session_id: str
+    name: str
+    code: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    project_type: str = "residential"
+    settings: Optional[Dict[str, Any]] = None
 
 
-# ===========================================
-# Project Endpoints
-# ===========================================
-
-@router.post("/projects", response_model=ProjectResponse)
-async def create_project(
-    project: ProjectCreate,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Create a new project/site"""
-    # Verify builder exists
-    result = await db.execute(
-        select(Builder).where(Builder.id == project.builder_id)
-    )
-    builder = result.scalar_one_or_none()
-    if not builder:
-        raise HTTPException(status_code=404, detail="Builder not found")
-    
-    # Create project
-    db_project = Project(**project.model_dump())
-    db_project.supermemory_namespace = str(db_project.id)  # Use project ID as namespace
-    db.add(db_project)
-    
-    # Update builder's site count
-    builder.sites_count += 1
-    
-    await db.commit()
-    await db.refresh(db_project)
-    
-    logger.info(f"Project created: {db_project.name} ({db_project.id})")
-    return db_project
+class TeamMember(BaseModel):
+    name: str
+    phone: str
+    role: str = "site_engineer"
+    permissions: Optional[Dict[str, bool]] = None
 
 
-@router.get("/projects", response_model=List[ProjectResponse])
-async def list_projects(
-    builder_id: Optional[UUID] = None,
-    status: Optional[str] = None,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """List all projects, optionally filtered by builder or status"""
-    query = select(Project)
-    
-    if builder_id:
-        query = query.where(Project.builder_id == builder_id)
-    if status:
-        query = query.where(Project.status == status)
-    
-    query = query.order_by(Project.created_at.desc()).offset(skip).limit(limit)
-    
-    result = await db.execute(query)
-    return result.scalars().all()
+class AddTeamMembersRequest(BaseModel):
+    session_id: str
+    project_id: str
+    members: List[TeamMember]
 
 
-@router.get("/projects/{project_id}", response_model=ProjectResponse)
-async def get_project(
-    project_id: UUID,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Get a specific project with details"""
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Get blueprint count
-    count_result = await db.execute(
-        select(func.count(Blueprint.id))
-        .where(Blueprint.project_id == project_id)
-    )
-    blueprint_count = count_result.scalar()
-    
-    response = ProjectResponse.model_validate(project)
-    response.blueprints_count = blueprint_count
-    
-    return response
+class QuickSetupSite(BaseModel):
+    name: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    team: Optional[List[TeamMember]] = None
 
 
-@router.patch("/projects/{project_id}", response_model=ProjectResponse)
-async def update_project(
-    project_id: UUID,
-    project_update: ProjectUpdate,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Update a project"""
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    for field, value in project_update.model_dump(exclude_unset=True).items():
-        setattr(project, field, value)
-    
-    await db.commit()
-    await db.refresh(project)
-    
-    logger.info(f"Project updated: {project.name}")
-    return project
+class QuickSetupRequest(BaseModel):
+    company_name: str
+    admin_name: str
+    admin_email: str
+    admin_phone: str
+    sites: List[QuickSetupSite]
+    plan: str = "pilot"
 
 
-# ===========================================
-# Blueprint Endpoints
-# ===========================================
+class UpdateConfigRequest(BaseModel):
+    config: Dict[str, Any]
 
-@router.post("/projects/{project_id}/blueprints", response_model=BlueprintResponse)
-async def upload_blueprint(
-    project_id: UUID,
-    file: UploadFile = File(...),
-    category: str = Form("other"),
-    revision: Optional[str] = Form(None),
-    drawing_number: Optional[str] = Form(None),
-    db: AsyncSession = Depends(get_async_session),
-):
+
+# =============================================================================
+# ONBOARDING ENDPOINTS
+# =============================================================================
+
+@router.post("/onboarding/start")
+async def start_onboarding(request: StartOnboardingRequest):
     """
-    Upload a blueprint PDF to a project
+    Start a new onboarding session
     
-    This will:
-    1. Upload the file to S3
-    2. Upload to Gemini for AI analysis
-    3. Store metadata in database
+    This is the first step in setting up a new customer.
+    Returns a session_id to use in subsequent calls.
     """
-    start_time = time.time()
-    
-    # Verify project exists
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Read file content
-    content = await file.read()
-    
-    # Upload to S3
-    storage_result = await storage_service.upload_file(
-        file_content=content,
-        filename=file.filename,
-        project_id=str(project_id),
-        category=category,
-    )
-    
-    if storage_result.get("error"):
-        raise HTTPException(status_code=400, detail=storage_result["error"])
-    
-    # Create blueprint record
-    blueprint = Blueprint(
-        project_id=project_id,
-        filename=file.filename,
-        file_url=storage_result["file_url"],
-        file_size=storage_result["file_size"],
-        category=category,
-        revision=revision,
-        drawing_number=drawing_number,
-    )
-    db.add(blueprint)
-    await db.commit()
-    await db.refresh(blueprint)
-    
-    # Upload to Gemini (in background-ish, but we wait for it)
     try:
-        # Save temp file for Gemini upload
-        import tempfile
-        import os
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(content)
-            tmp_path = tmp.name
-        
-        try:
-            gemini_result = await gemini_service.upload_blueprint(
-                file_path=tmp_path,
-                display_name=f"{project.name} - {file.filename}",
-            )
-            
-            if gemini_result:
-                blueprint.gemini_file_id = gemini_result["file_id"]
-                blueprint.gemini_file_uri = gemini_result["uri"]
-                blueprint.is_processed = True
-                await db.commit()
-                
-                logger.info(f"Blueprint uploaded and processed: {file.filename}")
-        finally:
-            os.unlink(tmp_path)
-            
+        session = onboarding_service.start_onboarding(
+            customer_name=request.customer_name,
+            contact_email=request.contact_email,
+            contact_phone=request.contact_phone,
+            plan=request.plan,
+        )
+        return {"success": True, "data": session}
     except Exception as e:
-        logger.error(f"Failed to process blueprint with Gemini: {e}")
-        blueprint.processing_error = str(e)
-        await db.commit()
-    
-    elapsed_ms = int((time.time() - start_time) * 1000)
-    logger.info(f"Blueprint upload completed in {elapsed_ms}ms")
-    
-    return blueprint
+        logger.error(f"Failed to start onboarding: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/projects/{project_id}/blueprints", response_model=List[BlueprintResponse])
-async def list_blueprints(
-    project_id: UUID,
-    category: Optional[str] = None,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """List all blueprints for a project"""
-    query = select(Blueprint).where(Blueprint.project_id == project_id)
-    
-    if category:
-        query = query.where(Blueprint.category == category)
-    
-    query = query.order_by(Blueprint.uploaded_at.desc())
-    
-    result = await db.execute(query)
-    return result.scalars().all()
+@router.get("/onboarding/{session_id}")
+async def get_onboarding_status(session_id: str):
+    """Get current onboarding session status"""
+    session = onboarding_service.get_onboarding_status(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"success": True, "data": session}
 
 
-@router.delete("/blueprints/{blueprint_id}")
-async def delete_blueprint(
-    blueprint_id: UUID,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Delete a blueprint"""
-    result = await db.execute(
-        select(Blueprint).where(Blueprint.id == blueprint_id)
-    )
-    blueprint = result.scalar_one_or_none()
-    
-    if not blueprint:
-        raise HTTPException(status_code=404, detail="Blueprint not found")
-    
-    # Delete from Gemini
-    if blueprint.gemini_file_id:
-        await gemini_service.delete_file(blueprint.gemini_file_id)
-    
-    # Delete from S3 (would need to extract key from URL)
-    # For now, just delete from DB
-    
-    await db.delete(blueprint)
-    await db.commit()
-    
-    logger.info(f"Blueprint deleted: {blueprint.filename}")
-    return {"status": "deleted"}
-
-
-# ===========================================
-# Site Engineer Endpoints
-# ===========================================
-
-@router.post("/projects/{project_id}/engineers", response_model=SiteEngineerResponse)
-async def add_site_engineer(
-    project_id: UUID,
-    engineer: SiteEngineerCreate,
-    send_welcome: bool = Query(True, description="Send welcome message via WhatsApp"),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Add a site engineer to a project"""
-    # Verify project exists
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Check if phone number already registered
-    existing = await db.execute(
-        select(SiteEngineer).where(SiteEngineer.phone_number == engineer.phone_number)
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=400, 
-            detail="Phone number already registered to another project"
+@router.post("/onboarding/organization")
+async def create_organization(request: CreateOrganizationRequest):
+    """Create organization for onboarding session"""
+    try:
+        org = onboarding_service.create_organization(
+            session_id=request.session_id,
+            name=request.name,
+            slug=request.slug,
+            billing_email=request.billing_email,
+            settings=request.settings,
         )
-    
-    # Create engineer
-    db_engineer = SiteEngineer(
-        project_id=project_id,
-        name=engineer.name,
-        phone_number=engineer.phone_number,
-        role=engineer.role,
-    )
-    db.add(db_engineer)
-    await db.commit()
-    await db.refresh(db_engineer)
-    
-    # Send welcome message
-    if send_welcome:
-        await whatsapp_client.send_welcome_message(
-            to=engineer.phone_number,
-            project_name=project.name,
+        return {"success": True, "data": org}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create organization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/onboarding/admin-user")
+async def create_admin_user(request: CreateAdminUserRequest):
+    """Create admin/owner user for organization"""
+    try:
+        user = onboarding_service.create_admin_user(
+            session_id=request.session_id,
+            name=request.name,
+            email=request.email,
+            phone=request.phone,
         )
-    
-    logger.info(f"Site engineer added: {engineer.name} to {project.name}")
-    return db_engineer
+        return {"success": True, "data": user}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create admin user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/projects/{project_id}/engineers", response_model=List[SiteEngineerResponse])
-async def list_site_engineers(
-    project_id: UUID,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """List all site engineers for a project"""
-    result = await db.execute(
-        select(SiteEngineer)
-        .where(SiteEngineer.project_id == project_id)
-        .order_by(SiteEngineer.created_at.desc())
-    )
-    return result.scalars().all()
+@router.post("/onboarding/project")
+async def create_project(request: CreateProjectRequest):
+    """Create a project/site"""
+    try:
+        project = onboarding_service.create_project(
+            session_id=request.session_id,
+            name=request.name,
+            code=request.code,
+            address=request.address,
+            city=request.city,
+            project_type=request.project_type,
+            settings=request.settings,
+        )
+        return {"success": True, "data": project}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create project: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/engineers/{engineer_id}")
-async def remove_site_engineer(
-    engineer_id: UUID,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Remove a site engineer (deactivate)"""
-    result = await db.execute(
-        select(SiteEngineer).where(SiteEngineer.id == engineer_id)
-    )
-    engineer = result.scalar_one_or_none()
-    
-    if not engineer:
-        raise HTTPException(status_code=404, detail="Engineer not found")
-    
-    engineer.is_active = False
-    await db.commit()
-    
-    logger.info(f"Site engineer deactivated: {engineer.name}")
-    return {"status": "deactivated"}
+@router.post("/onboarding/team-members")
+async def add_team_members(request: AddTeamMembersRequest):
+    """Add team members to a project"""
+    try:
+        members = [m.dict() for m in request.members]
+        results = onboarding_service.add_team_members_bulk(
+            session_id=request.session_id,
+            project_id=request.project_id,
+            members=members,
+        )
+        return {"success": True, "data": {"members_added": len(results), "members": results}}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to add team members: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# ===========================================
-# Memory Endpoints
-# ===========================================
+@router.post("/onboarding/{session_id}/complete-projects")
+async def complete_projects_step(session_id: str):
+    """Mark projects step as complete"""
+    onboarding_service.complete_projects_step(session_id)
+    return {"success": True, "message": "Projects step completed"}
 
-@router.post("/projects/{project_id}/memory")
-async def add_project_memory(
-    project_id: UUID,
-    content: str = Form(...),
-    doc_type: str = Form("note"),
-    drawing: Optional[str] = Form(None),
-    db: AsyncSession = Depends(get_async_session),
-):
+
+@router.post("/onboarding/{session_id}/complete-team")
+async def complete_team_step(session_id: str):
+    """Mark team members step as complete"""
+    onboarding_service.complete_team_step(session_id)
+    return {"success": True, "message": "Team step completed"}
+
+
+@router.post("/onboarding/{session_id}/drawings-uploaded")
+async def mark_drawings_uploaded(session_id: str, count: int):
+    """Mark drawings as uploaded"""
+    onboarding_service.mark_drawings_uploaded(session_id, count)
+    return {"success": True, "message": f"{count} drawings marked as uploaded"}
+
+
+@router.get("/onboarding/{session_id}/welcome-messages")
+async def get_welcome_messages(session_id: str):
+    """Generate welcome messages for team members"""
+    messages = onboarding_service.generate_welcome_messages(session_id)
+    return {"success": True, "data": {"messages": messages, "count": len(messages)}}
+
+
+@router.post("/onboarding/{session_id}/complete")
+async def complete_onboarding(session_id: str):
+    """Complete the onboarding process"""
+    try:
+        summary = onboarding_service.complete_onboarding(session_id)
+        return {"success": True, "data": summary}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# =============================================================================
+# QUICK SETUP (All-in-one)
+# =============================================================================
+
+@router.post("/quick-setup")
+async def quick_setup(request: QuickSetupRequest):
     """
-    Add a memory to the project's knowledge base
+    One-call setup for simple onboarding
     
-    Use this to add:
-    - RFIs (Request for Information)
-    - Change Orders
-    - Meeting Notes
-    - Important Decisions
+    Creates organization, admin user, projects, and team members in one call.
+    
+    Example:
+    ```json
+    {
+        "company_name": "ABC Builders",
+        "admin_name": "Rajesh Sharma",
+        "admin_email": "rajesh@abc.com",
+        "admin_phone": "+919876543210",
+        "sites": [{
+            "name": "Skyline Towers",
+            "address": "Sector 62, Noida",
+            "city": "Noida",
+            "team": [
+                {"name": "Ramesh", "phone": "+919876543211", "role": "site_engineer"},
+                {"name": "Priya", "phone": "+919876543212", "role": "pm"}
+            ]
+        }],
+        "plan": "pilot"
+    }
+    ```
     """
-    # Verify project exists
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Add to memory
-    metadata = {"drawing": drawing} if drawing else {}
-    result = await memory_service.add_document(
-        project_id=str(project_id),
-        content=content,
-        doc_type=doc_type,
-        metadata=metadata,
-    )
-    
-    logger.info(f"Memory added to project {project.name}: {doc_type}")
-    return result
+    try:
+        sites_data = []
+        for site in request.sites:
+            site_dict = {
+                "name": site.name,
+                "address": site.address,
+                "city": site.city,
+            }
+            if site.team:
+                site_dict["team"] = [m.dict() for m in site.team]
+            sites_data.append(site_dict)
+        
+        summary = onboarding_service.quick_setup(
+            company_name=request.company_name,
+            admin_name=request.admin_name,
+            admin_email=request.admin_email,
+            admin_phone=request.admin_phone,
+            sites=sites_data,
+            plan=request.plan,
+        )
+        return {"success": True, "data": summary}
+    except Exception as e:
+        logger.error(f"Quick setup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/projects/{project_id}/memory")
-async def get_project_memories(
-    project_id: UUID,
-    limit: int = Query(50, ge=1, le=100),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Get all memories for a project"""
-    memories = await memory_service.get_project_memories(
-        project_id=str(project_id),
-        limit=limit,
-    )
-    return {"memories": memories, "count": len(memories)}
+# =============================================================================
+# CONFIGURATION ENDPOINTS
+# =============================================================================
+
+@router.get("/organizations/{org_id}/config")
+async def get_organization_config(org_id: str):
+    """Get organization configuration"""
+    config = config_service.get_organization_config(org_id)
+    return {"success": True, "data": config}
 
 
-@router.get("/projects/{project_id}/memory/search")
-async def search_project_memory(
-    project_id: UUID,
-    query: str = Query(..., min_length=1),
-    limit: int = Query(5, ge=1, le=20),
-):
-    """Search project memory"""
-    result = await memory_service.search_memory(
-        project_id=str(project_id),
-        query=query,
-        limit=limit,
-    )
-    return result
+@router.put("/organizations/{org_id}/config")
+async def update_organization_config(org_id: str, request: UpdateConfigRequest):
+    """Update organization configuration"""
+    config = config_service.set_organization_config(org_id, request.config)
+    return {"success": True, "data": config}
 
+
+@router.get("/projects/{project_id}/config")
+async def get_project_config(project_id: str):
+    """Get project configuration"""
+    config = config_service.get_project_config(project_id)
+    return {"success": True, "data": config}
+
+
+@router.put("/projects/{project_id}/config")
+async def update_project_config(project_id: str, request: UpdateConfigRequest):
+    """Update project configuration"""
+    config = config_service.set_project_config(project_id, request.config)
+    return {"success": True, "data": config}
+
+
+@router.get("/users/{user_id}/config")
+async def get_user_config(user_id: str, role: str = "site_engineer"):
+    """Get user configuration"""
+    config = config_service.get_user_config(user_id, role)
+    return {"success": True, "data": config}
+
+
+@router.put("/users/{user_id}/config")
+async def update_user_config(user_id: str, request: UpdateConfigRequest):
+    """Update user configuration"""
+    config = config_service.set_user_config(user_id, request.config)
+    return {"success": True, "data": config}
+
+
+# =============================================================================
+# FEATURE FLAGS
+# =============================================================================
+
+@router.get("/organizations/{org_id}/features")
+async def get_enabled_features(org_id: str):
+    """Get list of enabled features for an organization"""
+    features = config_service.get_enabled_features(org_id)
+    return {"success": True, "data": {"features": features}}
+
+
+@router.post("/organizations/{org_id}/features/{feature}/enable")
+async def enable_feature(org_id: str, feature: str):
+    """Enable a feature for an organization"""
+    config_service.set_organization_config(org_id, {
+        "features": {feature: True}
+    })
+    return {"success": True, "message": f"Feature '{feature}' enabled"}
+
+
+@router.post("/organizations/{org_id}/features/{feature}/disable")
+async def disable_feature(org_id: str, feature: str):
+    """Disable a feature for an organization"""
+    config_service.set_organization_config(org_id, {
+        "features": {feature: False}
+    })
+    return {"success": True, "message": f"Feature '{feature}' disabled"}
+
+
+# =============================================================================
+# PERMISSIONS
+# =============================================================================
+
+@router.get("/users/{user_id}/permissions")
+async def get_user_permissions(user_id: str, role: str = "site_engineer"):
+    """Get user permissions"""
+    permissions = config_service.get_user_permissions(user_id, role)
+    return {"success": True, "data": {"permissions": permissions}}
+
+
+@router.post("/users/{user_id}/permissions")
+async def update_user_permissions(user_id: str, permissions: Dict[str, bool]):
+    """Update specific user permissions"""
+    config_service.set_user_config(user_id, {"permissions": permissions})
+    return {"success": True, "message": "Permissions updated"}

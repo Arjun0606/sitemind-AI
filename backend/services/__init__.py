@@ -77,6 +77,10 @@ from services.roi_service import ROIService
 from services.report_service import ReportService
 from services.engagement_service import EngagementService
 
+# Customer Management
+from services.config_service import ConfigService
+from services.onboarding_service import OnboardingService
+
 
 __all__ = [
     # Core AI
@@ -109,4 +113,8 @@ __all__ = [
     "ROIService",
     "ReportService",
     "EngagementService",
+    
+    # Customer Management
+    "ConfigService",
+    "OnboardingService",
 ]
