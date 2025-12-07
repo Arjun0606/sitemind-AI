@@ -149,6 +149,16 @@ async def whatsapp_webhook(
             tokens_used=ai_result.get("tokens_used"),
         )
         
+        # Store Q&A in Supermemory for future context (helps AI learn common questions)
+        background_tasks.add_task(
+            memory_service.add_whatsapp_query,
+            project_id=str(project.id),
+            question=user_message,
+            answer=response_text[:500],  # Truncate for storage
+            engineer_phone=user_phone,
+            engineer_name=ProfileName,
+        )
+        
         logger.info(f"Response sent to {user_phone} in {total_time_ms}ms")
         
         # Return empty TwiML response (we're sending via API)
