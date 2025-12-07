@@ -63,10 +63,10 @@ class Settings(BaseSettings):
     # PRICING (per company, unlimited projects)
     # ==========================================================================
     FLAT_FEE_USD: float = 1000.0
-    QUERY_PRICE_USD: float = 0.10
-    DOCUMENT_PRICE_USD: float = 2.00
-    PHOTO_PRICE_USD: float = 0.40
-    STORAGE_PRICE_USD: float = 0.50
+    QUERY_PRICE_USD: float = 0.20      # 90% margin
+    DOCUMENT_PRICE_USD: float = 4.00   # 90% margin
+    PHOTO_PRICE_USD: float = 0.80      # 90% margin
+    STORAGE_PRICE_USD: float = 0.25    # 92% margin
     
     # ==========================================================================
     # INCLUDED LIMITS (per company)

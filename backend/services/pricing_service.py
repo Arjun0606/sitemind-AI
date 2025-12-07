@@ -59,7 +59,7 @@ class PricingService:
         }
         
         # =================================================================
-        # USAGE PRICING (80%+ margins, slightly lower per-unit for volume)
+        # USAGE PRICING (90% margins - this is where we make money)
         # =================================================================
         
         # Our costs
@@ -70,12 +70,12 @@ class PricingService:
             "storage_gb": 0.02,  # Supabase
         }
         
-        # Our prices (80%+ margin)
+        # Our prices (90% margin = cost × 10)
         self.USAGE_PRICES = {
-            "query": 0.10,       # $0.10/query (80% margin)
-            "document": 2.00,    # $2.00/document (80% margin)
-            "photo": 0.40,       # $0.40/photo (80% margin)
-            "storage_gb": 0.50,  # $0.50/GB (96% margin)
+            "query": 0.20,       # $0.20/query (90% margin)
+            "document": 4.00,    # $4.00/document (90% margin)
+            "photo": 0.80,       # $0.80/photo (90% margin)
+            "storage_gb": 0.25,  # $0.25/GB (92% margin)
         }
         
         # =================================================================
@@ -134,10 +134,10 @@ ONE subscription. ALL your projects.
 
 **Usage (when you exceed limits)**
 
-• Query: ${self.USAGE_PRICES['query']}/query
-• Document: ${self.USAGE_PRICES['document']}/document
-• Photo: ${self.USAGE_PRICES['photo']}/photo
-• Storage: ${self.USAGE_PRICES['storage_gb']}/GB
+• Query: ${self.USAGE_PRICES['query']:.2f}/query
+• Document: ${self.USAGE_PRICES['document']:.2f}/document
+• Photo: ${self.USAGE_PRICES['photo']:.2f}/photo
+• Storage: ${self.USAGE_PRICES['storage_gb']:.2f}/GB
 
 _Tracked during month, billed next cycle_
 
