@@ -80,6 +80,7 @@ from services.engagement_service import EngagementService
 # Customer Management
 from services.config_service import ConfigService
 from services.onboarding_service import OnboardingService
+from services.team_management import TeamManagementService
 
 
 __all__ = [
@@ -117,4 +118,5 @@ __all__ = [
     # Customer Management
     "ConfigService",
     "OnboardingService",
+    "TeamManagementService",
 ]
