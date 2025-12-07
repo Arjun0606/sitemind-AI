@@ -1,22 +1,22 @@
 """
 SiteMind Services
-Core AI and business logic services
+Enterprise Construction Management Platform
 
-TECH STACK:
-- Gemini 3.0 Pro (State-of-the-art AI)
-- Supermemory.ai (Unlimited project context)
-- Twilio (WhatsApp)
-- Supabase (Database + Storage)
+CORE SERVICES:
+- Gemini AI (Blueprint analysis, multimodal)
+- Memory (Supermemory.ai - unlimited context)
+- WhatsApp (Twilio - communication layer)
+- Storage (Supabase - files + database)
 
-BUSINESS SERVICES:
-- ROI Tracking (Proves value to builders)
-- Automated Reports (Weekly/Monthly)
-- Pricing (Active sites + Archive upsell)
-- Project Lifecycle (Onboarding → Archive)
-
-ENGAGEMENT (Make it ADDICTIVE):
-- Smart Assistant (Language, typos, context)
-- Engagement Service (Streaks, milestones, summaries)
+ENTERPRISE FEATURES:
+- Red Flag Detection (Proactive risk identification)
+- Office-Site Sync (Bridge communication gaps)
+- Task Management (Live checklist tracking)
+- Progress Monitoring (AI-powered tracking)
+- Material Management (Inventory + consumption)
+- ROI Tracking (Prove value to clients)
+- Automated Reports (Weekly/monthly)
+- Subscription Management (Billing + anti-gaming)
 """
 
 from services.gemini_service import GeminiService
@@ -28,19 +28,40 @@ from services.report_service import ReportService
 from services.subscription_service import SubscriptionService
 from services.pricing_service import PricingService
 from services.project_lifecycle import ProjectLifecycleService
-from services.smart_assistant import SmartAssistant
+from services.smart_assistant import SmartAssistantService
 from services.engagement_service import EngagementService
+from services.red_flag_service import RedFlagService
+from services.office_site_sync import OfficeSiteSyncService
+from services.task_management import TaskManagementService
+from services.progress_monitoring import ProgressMonitoringService
+from services.material_management import MaterialManagementService
 
 __all__ = [
+    # Core AI
     "GeminiService",
     "MemoryService",
+    
+    # Communication
     "WhatsAppClient",
     "StorageService",
-    "ROIService",
-    "ReportService",
+    
+    # Business Logic
     "SubscriptionService",
     "PricingService",
     "ProjectLifecycleService",
-    "SmartAssistant",
+    
+    # Intelligence
+    "SmartAssistantService",
+    "RedFlagService",
+    
+    # Operations
+    "OfficeSiteSyncService",
+    "TaskManagementService",
+    "ProgressMonitoringService",
+    "MaterialManagementService",
+    
+    # Reporting
+    "ROIService",
+    "ReportService",
     "EngagementService",
 ]
