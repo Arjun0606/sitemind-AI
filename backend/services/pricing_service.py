@@ -1,17 +1,23 @@
 """
 SiteMind Pricing Service
-Flexible project-based pricing for real estate developers
+Value-based enterprise pricing for construction projects
 
-PRICING MODEL:
-- Per PROJECT (not per building)
-- A project can have 1 tower or 15 towers - same price
-- Volume discounts for multiple projects
-- Archive tier for completed projects
+PRICING PHILOSOPHY:
+- Price based on VALUE delivered, not flat fee
+- Larger projects = more risk = more value from SiteMind
+- More complexity = more queries = more savings
 
-EXAMPLES:
-- Township (15 buildings) = 1 project = $500/mo
-- Villas (30 units) = 1 project = $500/mo  
-- Single high-rise = 1 project = $500/mo
+PRICING FACTORS:
+1. Project Value (development cost)
+2. Complexity (number of buildings/units)
+3. Number of users
+4. Project duration
+
+TIERS:
+- Starter: Small projects < ₹50 Cr
+- Professional: Medium ₹50-200 Cr
+- Enterprise: Large ₹200-500 Cr
+- Premium: Mega > ₹500 Cr
 """
 
 from typing import Dict, Any, List, Optional
@@ -20,121 +26,257 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-class PlanType(str, Enum):
-    PILOT = "pilot"           # Free for 3 months
-    PROFESSIONAL = "professional"  # Standard pricing
-    ARCHIVE = "archive"       # Completed projects
+class ProjectTier(str, Enum):
+    STARTER = "starter"
+    PROFESSIONAL = "professional"
+    ENTERPRISE = "enterprise"
+    PREMIUM = "premium"
 
 
 @dataclass
-class PricingTier:
+class TierPricing:
     name: str
-    base_price_usd: float
+    min_value_cr: float
+    max_value_cr: float
+    base_price_usd: int
+    per_building_usd: int
+    per_user_usd: int
     description: str
-    features: List[str]
 
 
 class PricingService:
     """
-    Project-based pricing for SiteMind
+    Value-based pricing for SiteMind
     """
     
     def __init__(self):
-        # Base pricing
-        self.BASE_PRICE_USD = 500  # Per project per month
-        self.ARCHIVE_PRICE_USD = 50  # Per archived project per month
-        self.ARCHIVE_ONETIME_USD = 500  # One-time archive fee
+        # Define tiers
+        self.TIERS = {
+            ProjectTier.STARTER: TierPricing(
+                name="Starter",
+                min_value_cr=0,
+                max_value_cr=50,
+                base_price_usd=500,
+                per_building_usd=0,
+                per_user_usd=0,
+                description="Small projects, single buildings",
+            ),
+            ProjectTier.PROFESSIONAL: TierPricing(
+                name="Professional",
+                min_value_cr=50,
+                max_value_cr=200,
+                base_price_usd=1000,
+                per_building_usd=200,
+                per_user_usd=25,
+                description="Medium projects, multiple buildings",
+            ),
+            ProjectTier.ENTERPRISE: TierPricing(
+                name="Enterprise",
+                min_value_cr=200,
+                max_value_cr=500,
+                base_price_usd=2500,
+                per_building_usd=300,
+                per_user_usd=20,
+                description="Large complexes, townships",
+            ),
+            ProjectTier.PREMIUM: TierPricing(
+                name="Premium",
+                min_value_cr=500,
+                max_value_cr=float('inf'),
+                base_price_usd=5000,
+                per_building_usd=400,
+                per_user_usd=15,
+                description="Mega projects, dedicated support",
+            ),
+        }
         
-        # Volume discounts (by number of ACTIVE projects)
+        # Volume discounts (by total monthly spend)
         self.VOLUME_DISCOUNTS = {
-            3: 0.10,   # 3+ projects: 10% off
-            6: 0.15,   # 6+ projects: 15% off
-            10: 0.25,  # 10+ projects: 25% off
-            20: 0.30,  # 20+ projects: 30% off
+            5000: 0.05,    # $5K+/mo: 5% off
+            10000: 0.10,   # $10K+/mo: 10% off
+            25000: 0.15,   # $25K+/mo: 15% off
+            50000: 0.20,   # $50K+/mo: 20% off
         }
         
         # Pilot program
         self.PILOT_DURATION_MONTHS = 3
-        self.PILOT_SLOTS = 3  # First 3 customers
+        self.PILOT_DISCOUNT = 1.0  # 100% off (free)
         
-        # Track subscriptions
-        self._subscriptions: Dict[str, Dict] = {}
+        # Archive pricing
+        self.ARCHIVE_PERCENT = 0.10  # 10% of active price
+        self.ARCHIVE_MIN_USD = 100
+        
+        # USD to INR
+        self.USD_TO_INR = 83
+    
+    # =========================================================================
+    # TIER DETERMINATION
+    # =========================================================================
+    
+    def get_tier(self, project_value_cr: float) -> ProjectTier:
+        """Determine tier based on project value"""
+        for tier, pricing in self.TIERS.items():
+            if pricing.min_value_cr <= project_value_cr < pricing.max_value_cr:
+                return tier
+        return ProjectTier.PREMIUM
     
     # =========================================================================
     # PRICING CALCULATION
     # =========================================================================
     
-    def calculate_monthly_cost(
+    def calculate_project_price(
         self,
-        active_projects: int,
-        archived_projects: int = 0,
+        project_value_cr: float,
+        num_buildings: int = 1,
+        num_users: int = 5,
+        duration_months: int = 24,
+    ) -> Dict[str, Any]:
+        """
+        Calculate price for a single project
+        
+        Args:
+            project_value_cr: Project development cost in Crores (₹)
+            num_buildings: Number of buildings/towers
+            num_users: Number of team members using SiteMind
+            duration_months: Expected project duration
+        """
+        tier = self.get_tier(project_value_cr)
+        tier_pricing = self.TIERS[tier]
+        
+        # Base calculation
+        base = tier_pricing.base_price_usd
+        buildings_cost = max(0, num_buildings - 1) * tier_pricing.per_building_usd
+        users_cost = max(0, num_users - 5) * tier_pricing.per_user_usd  # First 5 users included
+        
+        monthly_usd = base + buildings_cost + users_cost
+        monthly_inr = monthly_usd * self.USD_TO_INR
+        
+        # Project value percentage (for context)
+        project_value_inr = project_value_cr * 10000000  # Cr to INR
+        monthly_percent = (monthly_inr / project_value_inr) * 100
+        
+        # Total project cost
+        total_usd = monthly_usd * duration_months
+        total_inr = total_usd * self.USD_TO_INR
+        
+        # ROI calculation (conservative estimate)
+        # Assume SiteMind saves 0.1% of project cost through error prevention
+        estimated_savings_inr = project_value_inr * 0.001  # 0.1% savings
+        roi_multiple = estimated_savings_inr / total_inr
+        
+        return {
+            "tier": tier.value,
+            "tier_name": tier_pricing.name,
+            
+            "project": {
+                "value_cr": project_value_cr,
+                "value_inr": project_value_inr,
+                "buildings": num_buildings,
+                "users": num_users,
+                "duration_months": duration_months,
+            },
+            
+            "pricing": {
+                "base_usd": base,
+                "buildings_usd": buildings_cost,
+                "users_usd": users_cost,
+                "monthly_usd": monthly_usd,
+                "monthly_inr": monthly_inr,
+                "monthly_percent_of_value": round(monthly_percent, 4),
+            },
+            
+            "total": {
+                "usd": total_usd,
+                "inr": total_inr,
+                "percent_of_value": round((total_inr / project_value_inr) * 100, 3),
+            },
+            
+            "roi": {
+                "estimated_savings_inr": estimated_savings_inr,
+                "roi_multiple": round(roi_multiple, 1),
+                "note": "Based on 0.1% error prevention savings (very conservative)",
+            },
+            
+            "breakdown": self._format_breakdown(tier_pricing, base, buildings_cost, users_cost, num_buildings, num_users),
+        }
+    
+    def calculate_company_price(
+        self,
+        projects: List[Dict],
         is_pilot: bool = False,
     ) -> Dict[str, Any]:
         """
-        Calculate monthly cost for a customer
+        Calculate total price for a company with multiple projects
         
         Args:
-            active_projects: Number of active projects
-            archived_projects: Number of archived projects
+            projects: List of project dicts with value_cr, buildings, users
             is_pilot: Whether this is a pilot customer
         """
         if is_pilot:
             return {
-                "active_cost": 0,
-                "archive_cost": 0,
-                "total_usd": 0,
+                "total_monthly_usd": 0,
+                "total_monthly_inr": 0,
                 "discount_percent": 100,
                 "plan": "pilot",
-                "note": "Pilot program - free for 3 months",
+                "note": f"Pilot program - FREE for {self.PILOT_DURATION_MONTHS} months",
+                "projects": projects,
             }
         
-        # Calculate base cost
-        base_cost = active_projects * self.BASE_PRICE_USD
+        project_prices = []
+        total_monthly = 0
+        
+        for proj in projects:
+            price = self.calculate_project_price(
+                project_value_cr=proj.get("value_cr", 50),
+                num_buildings=proj.get("buildings", 1),
+                num_users=proj.get("users", 5),
+            )
+            project_prices.append({
+                "name": proj.get("name", "Project"),
+                **price,
+            })
+            total_monthly += price["pricing"]["monthly_usd"]
         
         # Apply volume discount
         discount_percent = 0
-        for min_projects, discount in sorted(self.VOLUME_DISCOUNTS.items(), reverse=True):
-            if active_projects >= min_projects:
+        for threshold, discount in sorted(self.VOLUME_DISCOUNTS.items(), reverse=True):
+            if total_monthly >= threshold:
                 discount_percent = discount * 100
                 break
         
-        discount_amount = base_cost * (discount_percent / 100)
-        active_cost = base_cost - discount_amount
-        
-        # Archive cost
-        archive_cost = archived_projects * self.ARCHIVE_PRICE_USD
-        
-        total = active_cost + archive_cost
+        discount_amount = total_monthly * (discount_percent / 100)
+        final_monthly = total_monthly - discount_amount
         
         return {
-            "active_projects": active_projects,
-            "archived_projects": archived_projects,
-            "base_cost": base_cost,
-            "discount_percent": discount_percent,
-            "discount_amount": discount_amount,
-            "active_cost": active_cost,
-            "archive_cost": archive_cost,
-            "total_usd": total,
-            "total_inr": total * 83,  # Approximate conversion
-            "breakdown": self._get_breakdown(active_projects, archived_projects, discount_percent),
+            "projects": project_prices,
+            "subtotal_monthly_usd": total_monthly,
+            "volume_discount_percent": discount_percent,
+            "discount_amount_usd": discount_amount,
+            "total_monthly_usd": final_monthly,
+            "total_monthly_inr": final_monthly * self.USD_TO_INR,
+            "total_annual_usd": final_monthly * 12,
+            "total_annual_inr": final_monthly * 12 * self.USD_TO_INR,
         }
     
-    def _get_breakdown(
+    def _format_breakdown(
         self,
-        active: int,
-        archived: int,
-        discount: float,
+        tier: TierPricing,
+        base: int,
+        buildings_cost: int,
+        users_cost: int,
+        num_buildings: int,
+        num_users: int,
     ) -> str:
-        """Generate human-readable breakdown"""
-        lines = []
+        """Format pricing breakdown"""
+        lines = [f"{tier.name} tier base: ${base}"]
         
-        if active > 0:
-            lines.append(f"{active} active project(s) × ${self.BASE_PRICE_USD} = ${active * self.BASE_PRICE_USD}")
-            if discount > 0:
-                lines.append(f"Volume discount ({discount:.0f}%): -${(active * self.BASE_PRICE_USD) * (discount/100):.0f}")
+        if buildings_cost > 0:
+            extra_buildings = num_buildings - 1
+            lines.append(f"Additional buildings ({extra_buildings} × ${tier.per_building_usd}): ${buildings_cost}")
         
-        if archived > 0:
-            lines.append(f"{archived} archived project(s) × ${self.ARCHIVE_PRICE_USD} = ${archived * self.ARCHIVE_PRICE_USD}")
+        if users_cost > 0:
+            extra_users = num_users - 5
+            lines.append(f"Additional users ({extra_users} × ${tier.per_user_usd}): ${users_cost}")
         
         return "\n".join(lines)
     
@@ -144,70 +286,64 @@ class PricingService:
     
     def get_pricing_examples(self) -> List[Dict]:
         """Get pricing examples for different scenarios"""
+        examples = [
+            {
+                "scenario": "Small Residential Building",
+                "description": "Single 15-floor building, ₹35 Cr project",
+                **self.calculate_project_price(35, 1, 5),
+            },
+            {
+                "scenario": "Mid-size Commercial Complex",
+                "description": "3 buildings, ₹120 Cr project, 12 team members",
+                **self.calculate_project_price(120, 3, 12),
+            },
+            {
+                "scenario": "Large Township",
+                "description": "12 buildings, ₹350 Cr project, 25 team members",
+                **self.calculate_project_price(350, 12, 25),
+            },
+            {
+                "scenario": "Mega Integrated Township",
+                "description": "25 buildings, ₹800 Cr project, 50 team members",
+                **self.calculate_project_price(800, 25, 50),
+            },
+        ]
+        
+        return examples
+    
+    def get_tier_comparison(self) -> List[Dict]:
+        """Get tier comparison table"""
         return [
             {
-                "scenario": "Single High-Rise Project",
-                "description": "One 40-floor luxury tower",
-                "projects": 1,
-                **self.calculate_monthly_cost(1),
-            },
-            {
-                "scenario": "Township Development",
-                "description": "15 buildings, 2000+ units - still ONE project",
-                "projects": 1,
-                **self.calculate_monthly_cost(1),
-            },
-            {
-                "scenario": "Villa Community",
-                "description": "30 row houses/villas - ONE project",
-                "projects": 1,
-                **self.calculate_monthly_cost(1),
-            },
-            {
-                "scenario": "Large Developer (5 projects)",
-                "description": "5 active projects across the city",
-                "projects": 5,
-                **self.calculate_monthly_cost(5),
-            },
-            {
-                "scenario": "Major Builder (12 projects)",
-                "description": "12 active + 3 archived projects",
-                "projects": 12,
-                **self.calculate_monthly_cost(12, 3),
-            },
+                "tier": tier.value,
+                "name": pricing.name,
+                "project_value": f"₹{pricing.min_value_cr}-{pricing.max_value_cr if pricing.max_value_cr != float('inf') else '500+'} Cr",
+                "base_price": f"${pricing.base_price_usd}/mo",
+                "per_building": f"+${pricing.per_building_usd}/building" if pricing.per_building_usd else "Included",
+                "per_user": f"+${pricing.per_user_usd}/user (after 5)" if pricing.per_user_usd else "Included",
+                "description": pricing.description,
+            }
+            for tier, pricing in self.TIERS.items()
         ]
     
     # =========================================================================
     # ARCHIVE PRICING
     # =========================================================================
     
-    def get_archive_options(self) -> Dict[str, Any]:
-        """Get archive pricing options"""
+    def calculate_archive_price(self, active_monthly_usd: float) -> Dict[str, Any]:
+        """Calculate archive price for a completed project"""
+        archive_monthly = max(
+            self.ARCHIVE_MIN_USD,
+            active_monthly_usd * self.ARCHIVE_PERCENT
+        )
+        
         return {
-            "monthly": {
-                "price_usd": self.ARCHIVE_PRICE_USD,
-                "description": f"${self.ARCHIVE_PRICE_USD}/month per archived project",
-                "benefits": [
-                    "Full access to all project history",
-                    "Search all decisions and Q&A",
-                    "Export data anytime",
-                    "Legal documentation support",
-                ],
-            },
-            "one_time": {
-                "price_usd": self.ARCHIVE_ONETIME_USD,
-                "description": f"${self.ARCHIVE_ONETIME_USD} one-time per project",
-                "benefits": [
-                    "Permanent access to project history",
-                    "Downloadable archive",
-                    "No recurring fees",
-                    "5-year data retention",
-                ],
-            },
-            "volume_discount": {
-                "5_plus": "10% off for 5+ archived projects",
-                "10_plus": "20% off for 10+ archived projects",
-            },
+            "monthly_usd": archive_monthly,
+            "monthly_inr": archive_monthly * self.USD_TO_INR,
+            "annual_usd": archive_monthly * 12,
+            "discount_annual": "2 months free with annual",
+            "one_time_usd": archive_monthly * 10,  # 10 months = lifetime
+            "one_time_note": "Pay 10 months, keep forever",
         }
     
     # =========================================================================
@@ -217,69 +353,88 @@ class PricingService:
     def generate_quote(
         self,
         company_name: str,
-        active_projects: List[Dict],
-        archived_projects: List[Dict] = None,
+        projects: List[Dict],
         is_pilot: bool = False,
+        valid_days: int = 30,
     ) -> Dict[str, Any]:
         """Generate a formal quote"""
-        active_count = len(active_projects)
-        archived_count = len(archived_projects) if archived_projects else 0
+        pricing = self.calculate_company_price(projects, is_pilot)
         
-        pricing = self.calculate_monthly_cost(active_count, archived_count, is_pilot)
+        total_value = sum(p.get("value_cr", 0) for p in projects) * 10000000
+        total_monthly_inr = pricing.get("total_monthly_inr", 0)
         
         quote = {
-            "quote_id": f"Q-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+            "quote_id": f"SM-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
             "company": company_name,
-            "date": datetime.utcnow().isoformat(),
-            "valid_until": "30 days",
-            
-            "projects": {
-                "active": [
-                    {"name": p.get("name", "Project"), "type": p.get("type", "mixed")}
-                    for p in active_projects
-                ],
-                "archived": [
-                    {"name": p.get("name", "Project")}
-                    for p in (archived_projects or [])
-                ],
-            },
-            
+            "date": datetime.utcnow().strftime("%Y-%m-%d"),
+            "valid_until": f"{valid_days} days",
             "pricing": pricing,
-            
-            "terms": [
-                "Monthly billing, cancel anytime",
-                "14-day free trial available",
-                "Onboarding and training included",
+            "value_proposition": {
+                "total_project_value": f"₹{total_value/10000000:.0f} Cr",
+                "sitemind_cost_percent": f"{(total_monthly_inr * 12 / total_value) * 100:.3f}% of project value annually",
+                "estimated_savings": f"₹{total_value * 0.001 / 100000:.1f} Lakhs (0.1% error prevention)",
+            },
+            "includes": [
+                "Unlimited queries via WhatsApp",
+                "Blueprint analysis & Q&A",
+                "Full team access (PMs, Engineers, Consultants)",
+                "Complete audit trail with citations",
+                "ROI reporting",
                 "24/7 WhatsApp support",
+                "Personal onboarding & training",
+            ],
+            "terms": [
+                "Monthly billing, cancel with 30-day notice",
+                "Annual payment: 2 months free",
+                "14-day free trial available",
             ],
         }
         
         return quote
     
-    def format_quote_for_whatsapp(self, quote: Dict) -> str:
-        """Format quote for WhatsApp sharing"""
+    def format_quote_whatsapp(self, quote: Dict) -> str:
+        """Format quote for WhatsApp"""
         p = quote["pricing"]
+        v = quote["value_proposition"]
         
-        return f"""**SiteMind Quote**
+        msg = f"""**SiteMind Quote**
 {quote['company']}
+Quote: {quote['quote_id']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-**Projects:**
-• Active: {p['active_projects']}
-• Archived: {p['archived_projects']}
 
-**Monthly Cost:**
-{p['breakdown']}
+**Your Projects:**
+"""
+        
+        for proj in p.get("projects", []):
+            msg += f"• {proj.get('name', 'Project')} ({proj['tier_name']}): ${proj['pricing']['monthly_usd']}/mo\n"
+        
+        if p.get("volume_discount_percent", 0) > 0:
+            msg += f"\n**Volume Discount:** {p['volume_discount_percent']:.0f}% off\n"
+        
+        msg += f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**Total: ${p['total_usd']:.0f}/month**
-(₹{p['total_inr']:,.0f}/month)
+**Total: ${p['total_monthly_usd']:,.0f}/month**
+(₹{p['total_monthly_inr']:,.0f}/month)
+
+**Annual: ${p['total_annual_usd']:,.0f}**
+(₹{p['total_annual_inr']:,.0f})
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Quote ID: {quote['quote_id']}
+
+**Value:**
+• Project Value: {v['total_project_value']}
+• SiteMind: {v['sitemind_cost_percent']}
+• Est. Savings: {v['estimated_savings']}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Valid: {quote['valid_until']}
 
-_Includes: Onboarding, training, 24/7 support_
+_Reply to accept or ask questions!_
 """
+        return msg
     
     # =========================================================================
     # PILOT PROGRAM
@@ -288,26 +443,24 @@ _Includes: Onboarding, training, 24/7 support_
     def get_pilot_info(self) -> Dict[str, Any]:
         """Get pilot program information"""
         return {
-            "duration_months": self.PILOT_DURATION_MONTHS,
-            "slots_total": self.PILOT_SLOTS,
+            "name": "Founder's Pilot Program",
+            "duration": f"{self.PILOT_DURATION_MONTHS} months",
             "price": "FREE",
+            "slots": 3,
             "what_you_get": [
                 "Full access to all features",
-                "Unlimited projects during pilot",
-                "Personal onboarding call",
-                "Priority support via WhatsApp",
-                "Feedback sessions with founder",
+                "No project limits",
+                "Personal onboarding with founder",
+                "Direct WhatsApp access to founder",
+                "Shape the product roadmap",
             ],
-            "commitment": [
-                "Use SiteMind actively on at least 1 project",
-                "Provide honest feedback",
-                "Optional: testimonial if satisfied",
+            "what_we_ask": [
+                "Active use on at least 1 real project",
+                "Honest feedback (what works, what doesn't)",
+                "30-min call every 2 weeks",
+                "Testimonial if satisfied (optional)",
             ],
-            "after_pilot": {
-                "continue": f"${self.BASE_PRICE_USD}/project/month",
-                "volume_discounts": "Available for 3+ projects",
-                "cancel": "No obligation, export your data",
-            },
+            "after_pilot": "Continue at standard pricing with 20% founding customer discount",
         }
 
 
