@@ -1,153 +1,155 @@
 """
 SiteMind Pricing Service
-ONE PLAN: $500/month flat + Usage
+ONE subscription per company. Unlimited projects.
 
-SIMPLE PRICING:
+CURSOR-STYLE PRICING:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-SiteMind Enterprise: $500/month
-+ Usage charges (billed next cycle)
+$1,000/month per COMPANY
 
-That's it. One plan. For everyone.
+Includes:
+• Unlimited projects
+• Unlimited users
+• 1,000 queries/month
+• 50 documents/month
+• 200 photos/month
+• 25 GB storage
+
+Usage overage (billed next cycle):
+• Query:    $0.10/query
+• Document: $2.00/document
+• Photo:    $0.40/photo
+• Storage:  $0.50/GB
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHY THIS WORKS:
+- Big company (10 projects): $1000 is nothing
+- Small company (1 project): Still worth it
+- Heavy usage: They pay more (fair)
+- Simple billing: One invoice per company
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
-from dataclasses import dataclass
-
-
-@dataclass
-class UsageTracker:
-    """Track usage for billing"""
-    company_id: str
-    cycle_start: str
-    cycle_end: str
-    queries: int = 0
-    documents: int = 0
-    photos: int = 0
-    storage_gb: float = 0
 
 
 class PricingService:
     """
-    Simple pricing: $500 flat + usage
+    Simple pricing: $1000/company + usage
     """
     
     def __init__(self):
         # =================================================================
-        # THE ONE PLAN
+        # THE ONE PLAN - PER COMPANY
         # =================================================================
         
-        self.FLAT_FEE_USD = 500  # $500/month flat
+        self.FLAT_FEE_USD = 1000  # $1000/month per company
         
         # What's included in the flat fee
         self.INCLUDED = {
-            "users": "unlimited",      # No limit on users
-            "projects": "unlimited",   # No limit on projects
-            "queries": 500,            # 500 queries/month
-            "documents": 20,           # 20 documents/month
-            "photos": 100,             # 100 photos/month
-            "storage_gb": 10,          # 10 GB storage
+            "projects": "unlimited",   # No limit on projects!
+            "users": "unlimited",      # No limit on users!
+            "queries": 1000,           # 1000 queries/month
+            "documents": 50,           # 50 documents/month
+            "photos": 200,             # 200 photos/month
+            "storage_gb": 25,          # 25 GB storage
         }
         
         # =================================================================
-        # USAGE PRICING (80%+ margins)
+        # USAGE PRICING (80%+ margins, slightly lower per-unit for volume)
         # =================================================================
         
         # Our costs
         self.COSTS = {
-            "query": 0.03,       # Gemini API
-            "document": 0.50,    # Gemini Vision
-            "photo": 0.10,       # Gemini Vision
+            "query": 0.02,       # Gemini API (bulk)
+            "document": 0.40,    # Gemini Vision
+            "photo": 0.08,       # Gemini Vision
             "storage_gb": 0.02,  # Supabase
         }
         
         # Our prices (80%+ margin)
         self.USAGE_PRICES = {
-            "query": 0.15,       # $0.15/query
-            "document": 2.50,    # $2.50/document
-            "photo": 0.50,       # $0.50/photo
-            "storage_gb": 1.00,  # $1.00/GB
+            "query": 0.10,       # $0.10/query (80% margin)
+            "document": 2.00,    # $2.00/document (80% margin)
+            "photo": 0.40,       # $0.40/photo (80% margin)
+            "storage_gb": 0.50,  # $0.50/GB (96% margin)
         }
         
         # =================================================================
-        # OTHER
+        # DISCOUNTS
         # =================================================================
         
-        self.ANNUAL_DISCOUNT = 0.17  # 2 months free
-        self.FOUNDING_DISCOUNT = 0.25  # 25% off for pilots
+        self.ANNUAL_DISCOUNT = 0.17      # 2 months free (pay 10, get 12)
+        self.FOUNDING_DISCOUNT = 0.25    # 25% off for first 10 customers
+        
+        # =================================================================
+        # CONVERSION
+        # =================================================================
+        
         self.USD_TO_INR = 83
-        
-        # Usage tracking
-        self._usage: Dict[str, UsageTracker] = {}
     
     # =========================================================================
-    # USAGE TRACKING
+    # PRICING INFO
     # =========================================================================
     
-    def track_query(self, company_id: str):
-        """Track a query"""
-        self._ensure_tracker(company_id)
-        self._usage[company_id].queries += 1
-    
-    def track_document(self, company_id: str):
-        """Track a document processed"""
-        self._ensure_tracker(company_id)
-        self._usage[company_id].documents += 1
-    
-    def track_photo(self, company_id: str):
-        """Track a photo analyzed"""
-        self._ensure_tracker(company_id)
-        self._usage[company_id].photos += 1
-    
-    def track_storage(self, company_id: str, gb: float):
-        """Track storage (peak usage)"""
-        self._ensure_tracker(company_id)
-        self._usage[company_id].storage_gb = max(
-            self._usage[company_id].storage_gb, gb
-        )
-    
-    def _ensure_tracker(self, company_id: str):
-        """Ensure tracker exists"""
-        if company_id not in self._usage:
-            now = datetime.utcnow()
-            self._usage[company_id] = UsageTracker(
-                company_id=company_id,
-                cycle_start=now.isoformat(),
-                cycle_end=(now + timedelta(days=30)).isoformat(),
-            )
-    
-    def get_current_usage(self, company_id: str) -> Dict[str, Any]:
-        """Get current cycle usage"""
-        tracker = self._usage.get(company_id)
-        if not tracker:
-            return {
-                "queries": 0,
-                "documents": 0,
-                "photos": 0,
-                "storage_gb": 0,
-            }
-        
+    def get_pricing(self) -> Dict[str, Any]:
+        """Get pricing info"""
         return {
-            "queries": tracker.queries,
-            "documents": tracker.documents,
-            "photos": tracker.photos,
-            "storage_gb": tracker.storage_gb,
-            "cycle_start": tracker.cycle_start,
-            "cycle_end": tracker.cycle_end,
+            "plan": "SiteMind Enterprise",
+            "flat_fee_usd": self.FLAT_FEE_USD,
+            "flat_fee_inr": self.FLAT_FEE_USD * self.USD_TO_INR,
+            "included": self.INCLUDED,
+            "usage_prices": self.USAGE_PRICES,
+            "annual_discount": self.ANNUAL_DISCOUNT,
+            "annual_price_usd": self.FLAT_FEE_USD * 12 * (1 - self.ANNUAL_DISCOUNT),
         }
     
-    def reset_cycle(self, company_id: str) -> Dict[str, Any]:
-        """Reset cycle and return final usage"""
-        usage = self.get_current_usage(company_id)
-        if company_id in self._usage:
-            del self._usage[company_id]
-        return usage
+    def get_pricing_page(self) -> str:
+        """Formatted pricing for display"""
+        annual = int(self.FLAT_FEE_USD * 12 * (1 - self.ANNUAL_DISCOUNT))
+        
+        return f"""
+🏗️ **SiteMind Pricing**
+
+ONE subscription. ALL your projects.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**${self.FLAT_FEE_USD}/month** per company
+
+✓ **Unlimited projects** - 1 or 100, same price
+✓ **Unlimited users** - Add your whole team
+✓ {self.INCLUDED['queries']:,} queries/month
+✓ {self.INCLUDED['documents']} documents/month
+✓ {self.INCLUDED['photos']} photos/month
+✓ {self.INCLUDED['storage_gb']} GB storage
+✓ WhatsApp access 24/7
+✓ Complete audit trail
+✓ Personal onboarding
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Usage (when you exceed limits)**
+
+• Query: ${self.USAGE_PRICES['query']}/query
+• Document: ${self.USAGE_PRICES['document']}/document
+• Photo: ${self.USAGE_PRICES['photo']}/photo
+• Storage: ${self.USAGE_PRICES['storage_gb']}/GB
+
+_Tracked during month, billed next cycle_
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Annual:** ${annual:,}/year (save {int(self.ANNUAL_DISCOUNT * 100)}%)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
     
     # =========================================================================
-    # CALCULATE USAGE CHARGES
+    # USAGE CALCULATION
     # =========================================================================
     
     def calculate_usage(
@@ -157,7 +159,7 @@ class PricingService:
         photos: int,
         storage_gb: float,
     ) -> Dict[str, Any]:
-        """Calculate usage charges"""
+        """Calculate usage charges (overages only)"""
         
         breakdown = {
             "queries": {
@@ -192,26 +194,14 @@ class PricingService:
         
         total = sum(item["charge"] for item in breakdown.values())
         
-        # Our cost calculation
-        our_cost = (
-            queries * self.COSTS["query"] +
-            documents * self.COSTS["document"] +
-            photos * self.COSTS["photo"] +
-            storage_gb * self.COSTS["storage_gb"]
-        )
-        
-        margin = ((total - our_cost) / total * 100) if total > 0 else 100
-        
         return {
             "breakdown": breakdown,
             "total_usd": round(total, 2),
             "total_inr": round(total * self.USD_TO_INR, 2),
-            "our_cost": round(our_cost, 2),
-            "margin_percent": round(margin, 1),
         }
     
     # =========================================================================
-    # GENERATE INVOICE
+    # INVOICE GENERATION
     # =========================================================================
     
     def generate_invoice(
@@ -219,17 +209,27 @@ class PricingService:
         company_name: str,
         previous_usage: Dict = None,
         is_founding: bool = False,
+        is_annual: bool = False,
     ) -> Dict[str, Any]:
         """
         Generate invoice:
-        - $500 flat fee for THIS cycle
+        - Flat fee for THIS cycle
         - Usage from PREVIOUS cycle
         """
         
         # Flat fee
-        flat_fee = self.FLAT_FEE_USD
+        if is_annual:
+            flat_fee = self.FLAT_FEE_USD * 12 * (1 - self.ANNUAL_DISCOUNT)
+            period = "Annual"
+        else:
+            flat_fee = self.FLAT_FEE_USD
+            period = "Monthly"
+        
+        # Founding discount
+        founding_discount = 0
         if is_founding:
-            flat_fee = flat_fee * (1 - self.FOUNDING_DISCOUNT)
+            founding_discount = flat_fee * self.FOUNDING_DISCOUNT
+            flat_fee = flat_fee - founding_discount
         
         # Usage from previous cycle
         usage_charges = None
@@ -251,16 +251,18 @@ class PricingService:
             "company": company_name,
             "date": datetime.utcnow().strftime("%Y-%m-%d"),
             "due_date": (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%d"),
+            "period": period,
             
-            "flat_fee_usd": flat_fee,
-            "is_founding": is_founding,
-            "founding_discount": self.FOUNDING_DISCOUNT if is_founding else 0,
+            "flat_fee_usd": self.FLAT_FEE_USD if not is_annual else self.FLAT_FEE_USD * 12,
+            "discount_type": "founding" if is_founding else ("annual" if is_annual else None),
+            "discount_amount": founding_discount if is_founding else (self.FLAT_FEE_USD * 12 * self.ANNUAL_DISCOUNT if is_annual else 0),
+            "net_flat_fee_usd": flat_fee,
             
             "usage": usage_charges,
             "usage_total_usd": usage_total,
             
-            "total_usd": total,
-            "total_inr": total * self.USD_TO_INR,
+            "total_usd": round(total, 2),
+            "total_inr": round(total * self.USD_TO_INR, 2),
         }
     
     def format_invoice(self, invoice: Dict) -> str:
@@ -277,16 +279,30 @@ Date:     {invoice['date']}
 Due:      {invoice['due_date']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SUBSCRIPTION
+SUBSCRIPTION ({invoice['period']})
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-SiteMind Enterprise                        ${self.FLAT_FEE_USD:.2f}"""
+SiteMind Enterprise                      ${invoice['flat_fee_usd']:,.2f}
+• Unlimited projects
+• Unlimited users
+• {self.INCLUDED['queries']:,} queries
+• {self.INCLUDED['documents']} documents
+• {self.INCLUDED['photos']} photos
+• {self.INCLUDED['storage_gb']} GB storage"""
 
-        if invoice.get('is_founding'):
+        if invoice.get('discount_type') == 'founding':
             msg += f"""
-Founding Customer Discount (-{int(invoice['founding_discount']*100)}%)   -${self.FLAT_FEE_USD * invoice['founding_discount']:.2f}
-                                           ─────────
-Subscription Total                         ${invoice['flat_fee_usd']:.2f}"""
+
+Founding Customer Discount (-25%)       -${invoice['discount_amount']:,.2f}"""
+        elif invoice.get('discount_type') == 'annual':
+            msg += f"""
+
+Annual Discount (-17%)                  -${invoice['discount_amount']:,.2f}"""
+
+        if invoice.get('discount_type'):
+            msg += f"""
+                                         ─────────
+Subscription Total                       ${invoice['net_flat_fee_usd']:,.2f}"""
 
         usage = invoice.get('usage')
         if usage and usage['total_usd'] > 0:
@@ -300,83 +316,31 @@ USAGE (from previous billing cycle)
                 if data['overage'] > 0:
                     label = item.replace('_', ' ').title()
                     msg += f"""
-{label:12}  {data['used']:>5} used ({data['included']} included)
-              {data['overage']:>5} extra × ${data['rate']:.2f}        ${data['charge']:>8.2f}"""
+{label:12}  {data['used']:>6} used ({data['included']:,} included)
+              {data['overage']:>6} extra × ${data['rate']:.2f}      ${data['charge']:>8.2f}"""
             
             msg += f"""
 
-                                           ─────────
-Usage Total                                ${usage['total_usd']:>8.2f}"""
+                                         ─────────
+Usage Total                              ${usage['total_usd']:>8.2f}"""
 
         msg += f"""
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-TOTAL DUE                                  ${invoice['total_usd']:>8.2f}
-                                           ₹{invoice['total_inr']:>,.0f}
+TOTAL DUE                                ${invoice['total_usd']:>8.2f}
+                                         ₹{invoice['total_inr']:>,.0f}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
         return msg
     
     # =========================================================================
-    # PRICING PAGE
-    # =========================================================================
-    
-    def get_pricing(self) -> Dict[str, Any]:
-        """Get pricing info"""
-        return {
-            "plan": "SiteMind Enterprise",
-            "flat_fee_usd": self.FLAT_FEE_USD,
-            "flat_fee_inr": self.FLAT_FEE_USD * self.USD_TO_INR,
-            "included": self.INCLUDED,
-            "usage_prices": self.USAGE_PRICES,
-            "annual_discount": self.ANNUAL_DISCOUNT,
-        }
-    
-    def get_pricing_page(self) -> str:
-        """Formatted pricing"""
-        return f"""
-**SiteMind Pricing**
-One plan. Simple.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**${self.FLAT_FEE_USD}/month**
-
-Everything you need:
-✓ Unlimited users
-✓ Unlimited projects
-✓ {self.INCLUDED['queries']} queries/month
-✓ {self.INCLUDED['documents']} documents/month
-✓ {self.INCLUDED['photos']} photos/month
-✓ {self.INCLUDED['storage_gb']} GB storage
-✓ 24/7 WhatsApp support
-✓ Complete audit trail
-✓ Personal onboarding
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Usage (when you exceed included limits)**
-
-• Query: ${self.USAGE_PRICES['query']}/query
-• Document: ${self.USAGE_PRICES['document']}/document
-• Photo: ${self.USAGE_PRICES['photo']}/photo
-• Storage: ${self.USAGE_PRICES['storage_gb']}/GB
-
-_Usage tracked during cycle, billed next month_
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Annual:** Save {int(self.ANNUAL_DISCOUNT * 100)}% (${int(self.FLAT_FEE_USD * 12 * (1 - self.ANNUAL_DISCOUNT))}/year)
-"""
-    
-    # =========================================================================
-    # MARGIN CHECK
+    # MARGIN VERIFICATION
     # =========================================================================
     
     def verify_margins(self) -> Dict[str, Any]:
-        """Verify 80%+ margins"""
+        """Verify 80%+ margins on usage"""
         results = {}
         for item in ["query", "document", "photo", "storage_gb"]:
             cost = self.COSTS[item]

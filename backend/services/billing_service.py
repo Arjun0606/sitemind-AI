@@ -20,7 +20,7 @@ from services.pricing_service import pricing_service
 
 @dataclass
 class CompanyUsage:
-    """Track usage for a company"""
+    """Track usage for a company (unlimited projects)"""
     company_id: str
     company_name: str
     cycle_start: str
@@ -32,11 +32,11 @@ class CompanyUsage:
     photos: int = 0
     storage_gb: float = 0
     
-    # Included limits
-    queries_included: int = 500
-    documents_included: int = 20
-    photos_included: int = 100
-    storage_included_gb: int = 10
+    # Included limits (per company)
+    queries_included: int = 1000
+    documents_included: int = 50
+    photos_included: int = 200
+    storage_included_gb: int = 25
 
 
 class BillingService:

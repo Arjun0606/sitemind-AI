@@ -60,21 +60,21 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     
     # ==========================================================================
-    # PRICING
+    # PRICING (per company, unlimited projects)
     # ==========================================================================
-    FLAT_FEE_USD: float = 500.0
-    QUERY_PRICE_USD: float = 0.15
-    DOCUMENT_PRICE_USD: float = 2.50
-    PHOTO_PRICE_USD: float = 0.50
-    STORAGE_PRICE_USD: float = 1.00
+    FLAT_FEE_USD: float = 1000.0
+    QUERY_PRICE_USD: float = 0.10
+    DOCUMENT_PRICE_USD: float = 2.00
+    PHOTO_PRICE_USD: float = 0.40
+    STORAGE_PRICE_USD: float = 0.50
     
     # ==========================================================================
-    # INCLUDED LIMITS
+    # INCLUDED LIMITS (per company)
     # ==========================================================================
-    INCLUDED_QUERIES: int = 500
-    INCLUDED_DOCUMENTS: int = 20
-    INCLUDED_PHOTOS: int = 100
-    INCLUDED_STORAGE_GB: int = 10
+    INCLUDED_QUERIES: int = 1000
+    INCLUDED_DOCUMENTS: int = 50
+    INCLUDED_PHOTOS: int = 200
+    INCLUDED_STORAGE_GB: int = 25
     
     class Config:
         env_file = ".env"
