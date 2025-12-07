@@ -1,40 +1,31 @@
 """
 SiteMind Logger
-Structured logging configuration
+Structured logging with loguru
 """
 
-import logging
 import sys
-from typing import Optional
+from loguru import logger
 
+# Configure loguru
+logger.remove()  # Remove default handler
 
-def setup_logger(name: str = "sitemind", level: int = logging.INFO) -> logging.Logger:
-    """
-    Set up a logger with consistent formatting
-    """
-    logger = logging.getLogger(name)
-    
-    # Don't add handlers if already set up
-    if logger.handlers:
-        return logger
-    
-    logger.setLevel(level)
-    
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    
-    # Format
-    formatter = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)-8s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
-    console_handler.setFormatter(formatter)
-    
-    logger.addHandler(console_handler)
-    
-    return logger
+# Console output with colors
+logger.add(
+    sys.stdout,
+    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{function}</cyan>: <level>{message}</level>",
+    level="INFO",
+    colorize=True,
+)
 
+# File output for debugging
+logger.add(
+    "logs/sitemind_{time:YYYY-MM-DD}.log",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}",
+    level="DEBUG",
+    rotation="1 day",
+    retention="7 days",
+    compression="zip",
+)
 
-# Main logger instance
-logger = setup_logger()
+# Export
+__all__ = ["logger"]

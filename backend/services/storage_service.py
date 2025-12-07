@@ -2,17 +2,16 @@
 SiteMind Storage Service
 File storage using Supabase Storage
 
-FEATURES:
-- Upload documents (drawings, PDFs)
-- Upload images (site photos)
-- Generate signed URLs
-- Organize by project
+BUCKETS:
+- documents: PDFs, drawings, specs
+- photos: Site photos
+- exports: Generated reports
 """
 
-from typing import Optional, Dict, Any
-import httpx
-import base64
+from typing import Dict, Any, Optional
 from datetime import datetime
+import httpx
+import uuid
 
 from config import settings
 from utils.logger import logger
@@ -20,213 +19,255 @@ from utils.logger import logger
 
 class StorageService:
     """
-    File storage using Supabase Storage
+    Supabase Storage wrapper
     """
     
     def __init__(self):
-        self.supabase_url = settings.SUPABASE_URL
-        self.supabase_key = settings.SUPABASE_SERVICE_KEY
-        self.bucket = settings.STORAGE_BUCKET
+        self.url = settings.SUPABASE_URL
+        self.key = settings.SUPABASE_SERVICE_KEY or settings.SUPABASE_KEY
+        self.storage_url = f"{self.url}/storage/v1"
         
-        # In-memory fallback for development
-        self._local_files: Dict[str, Dict] = {}
+        self.headers = {
+            "apikey": self.key,
+            "Authorization": f"Bearer {self.key}",
+        }
+        
+        # Local fallback storage
+        self._local_files: Dict[str, bytes] = {}
     
-    async def upload_document(
+    def _is_configured(self) -> bool:
+        """Check if Supabase is configured"""
+        return (
+            self.url and
+            self.url != "your_supabase_url" and
+            "supabase" in self.url
+        )
+    
+    # =========================================================================
+    # UPLOAD
+    # =========================================================================
+    
+    async def upload(
         self,
-        project_id: str,
+        bucket: str,
         file_content: bytes,
         file_name: str,
         content_type: str,
-        user_id: str = None,
+        company_id: str = None,
+        project_id: str = None,
     ) -> Dict[str, Any]:
         """
-        Upload a document to storage
+        Upload file to storage
         
         Args:
-            project_id: Project identifier
-            file_content: File bytes
+            bucket: Storage bucket (documents, photos, exports)
+            file_content: Raw file bytes
             file_name: Original filename
             content_type: MIME type
-            user_id: Who uploaded
+            company_id: For path organization
+            project_id: For path organization
             
         Returns:
-            Upload result with path and URL
+            Upload result with URL
         """
-        # Generate storage path
+        # Generate unique path
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        safe_name = file_name.replace(" ", "_").lower()
-        path = f"{project_id}/documents/{timestamp}_{safe_name}"
+        unique_id = str(uuid.uuid4())[:8]
         
-        # Try Supabase
-        if self.supabase_url and self.supabase_url != "your_supabase_url":
+        # Build path: company/project/timestamp_uuid_filename
+        path_parts = []
+        if company_id:
+            path_parts.append(company_id[:8])
+        if project_id:
+            path_parts.append(project_id[:8])
+        path_parts.append(f"{timestamp}_{unique_id}_{file_name}")
+        
+        path = "/".join(path_parts)
+        
+        if self._is_configured():
             try:
-                result = await self._upload_to_supabase(path, file_content, content_type)
-                logger.info(f"📁 Document uploaded to Supabase: {path}")
-                return result
-            except Exception as e:
-                logger.warning(f"Supabase upload error, using local: {e}")
-        
-        # Local fallback
-        file_id = f"file_{datetime.utcnow().timestamp():.0f}"
-        self._local_files[file_id] = {
-            "id": file_id,
-            "path": path,
-            "name": file_name,
-            "content_type": content_type,
-            "size": len(file_content),
-            "project_id": project_id,
-            "uploaded_by": user_id,
-            "uploaded_at": datetime.utcnow().isoformat(),
-        }
-        
-        logger.info(f"📁 Document stored locally: {path}")
-        
-        return {
-            "id": file_id,
-            "path": path,
-            "url": f"/api/files/{file_id}",
-            "name": file_name,
-        }
-    
-    async def upload_image(
-        self,
-        project_id: str,
-        image_content: bytes,
-        file_name: str,
-        image_type: str = "progress",
-        user_id: str = None,
-    ) -> Dict[str, Any]:
-        """
-        Upload an image to storage
-        
-        Args:
-            project_id: Project identifier
-            image_content: Image bytes
-            file_name: Original filename
-            image_type: progress, issue, drawing, etc.
-            user_id: Who uploaded
-        """
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        path = f"{project_id}/images/{image_type}/{timestamp}_{file_name}"
-        
-        # Try Supabase
-        if self.supabase_url and self.supabase_url != "your_supabase_url":
-            try:
-                result = await self._upload_to_supabase(path, image_content, "image/jpeg")
-                logger.info(f"📷 Image uploaded to Supabase: {path}")
-                return result
-            except Exception as e:
-                logger.warning(f"Supabase upload error, using local: {e}")
-        
-        # Local fallback
-        file_id = f"img_{datetime.utcnow().timestamp():.0f}"
-        self._local_files[file_id] = {
-            "id": file_id,
-            "path": path,
-            "name": file_name,
-            "content_type": "image/jpeg",
-            "size": len(image_content),
-            "project_id": project_id,
-            "image_type": image_type,
-            "uploaded_by": user_id,
-            "uploaded_at": datetime.utcnow().isoformat(),
-        }
-        
-        logger.info(f"📷 Image stored locally: {path}")
-        
-        return {
-            "id": file_id,
-            "path": path,
-            "url": f"/api/files/{file_id}",
-            "name": file_name,
-        }
-    
-    async def download_from_url(self, url: str) -> bytes:
-        """Download file from external URL (e.g., Twilio media)"""
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url)
-            if response.status_code == 200:
-                return response.content
-            else:
-                raise Exception(f"Failed to download: {response.status_code}")
-    
-    async def get_signed_url(self, path: str, expires_in: int = 3600) -> str:
-        """Get a signed URL for file access"""
-        if self.supabase_url and self.supabase_url != "your_supabase_url":
-            try:
-                return await self._get_supabase_signed_url(path, expires_in)
-            except Exception as e:
-                logger.warning(f"Supabase signed URL error: {e}")
-        
-        # Return local path
-        return f"/api/files/download?path={path}"
-    
-    def get_file(self, file_id: str) -> Optional[Dict]:
-        """Get file metadata by ID"""
-        return self._local_files.get(file_id)
-    
-    async def list_project_files(
-        self,
-        project_id: str,
-        file_type: str = None,
-    ) -> list:
-        """List files for a project"""
-        files = [
-            f for f in self._local_files.values()
-            if f.get("project_id") == project_id
-        ]
-        
-        if file_type:
-            files = [f for f in files if f.get("content_type", "").startswith(file_type)]
-        
-        return sorted(files, key=lambda x: x.get("uploaded_at", ""), reverse=True)
-    
-    # =========================================================================
-    # SUPABASE METHODS
-    # =========================================================================
-    
-    async def _upload_to_supabase(
-        self,
-        path: str,
-        content: bytes,
-        content_type: str,
-    ) -> Dict:
-        """Upload to Supabase Storage"""
-        url = f"{self.supabase_url}/storage/v1/object/{self.bucket}/{path}"
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {self.supabase_key}",
+                url = f"{self.storage_url}/object/{bucket}/{path}"
+                
+                headers = {
+                    **self.headers,
                     "Content-Type": content_type,
-                },
-                content=content,
-            )
-            
-            if response.status_code in [200, 201]:
-                return {
-                    "path": path,
-                    "url": f"{self.supabase_url}/storage/v1/object/public/{self.bucket}/{path}",
                 }
-            else:
-                raise Exception(f"Supabase upload error: {response.status_code}")
-    
-    async def _get_supabase_signed_url(self, path: str, expires_in: int) -> str:
-        """Get signed URL from Supabase"""
-        url = f"{self.supabase_url}/storage/v1/object/sign/{self.bucket}/{path}"
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        url,
+                        headers=headers,
+                        content=file_content,
+                        timeout=60.0,
+                    )
+                    
+                    if response.status_code in [200, 201]:
+                        public_url = f"{self.url}/storage/v1/object/public/{bucket}/{path}"
+                        
+                        logger.info(f"📁 Uploaded to {bucket}/{path}")
+                        
+                        return {
+                            "status": "uploaded",
+                            "path": path,
+                            "bucket": bucket,
+                            "url": public_url,
+                            "size_bytes": len(file_content),
+                        }
+                    else:
+                        logger.error(f"Storage error: {response.status_code} - {response.text}")
+                        
+            except Exception as e:
+                logger.error(f"Storage upload error: {e}")
         
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers={"Authorization": f"Bearer {self.supabase_key}"},
-                json={"expiresIn": expires_in},
-            )
+        # Fallback to local storage
+        return self._upload_local(bucket, path, file_content)
+    
+    def _upload_local(self, bucket: str, path: str, content: bytes) -> Dict:
+        """Local fallback storage"""
+        key = f"{bucket}/{path}"
+        self._local_files[key] = content
+        
+        logger.info(f"📁 Stored locally: {key}")
+        
+        return {
+            "status": "stored_locally",
+            "path": path,
+            "bucket": bucket,
+            "url": f"local://{key}",
+            "size_bytes": len(content),
+        }
+    
+    # =========================================================================
+    # DOWNLOAD
+    # =========================================================================
+    
+    async def download(self, bucket: str, path: str) -> Optional[bytes]:
+        """Download file from storage"""
+        if self._is_configured():
+            try:
+                url = f"{self.storage_url}/object/{bucket}/{path}"
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, headers=self.headers, timeout=60.0)
+                    
+                    if response.status_code == 200:
+                        return response.content
+                    else:
+                        logger.error(f"Storage download error: {response.status_code}")
+                        
+            except Exception as e:
+                logger.error(f"Storage download error: {e}")
+        
+        # Check local fallback
+        key = f"{bucket}/{path}"
+        return self._local_files.get(key)
+    
+    # =========================================================================
+    # SIGNED URLS
+    # =========================================================================
+    
+    async def get_signed_url(
+        self,
+        bucket: str,
+        path: str,
+        expires_in: int = 3600,
+    ) -> Optional[str]:
+        """Get a signed URL for private file access"""
+        if not self._is_configured():
+            return None
+        
+        try:
+            url = f"{self.storage_url}/object/sign/{bucket}/{path}"
             
-            if response.status_code == 200:
-                return response.json().get("signedURL")
-            else:
-                raise Exception(f"Supabase signed URL error: {response.status_code}")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url,
+                    headers=self.headers,
+                    json={"expiresIn": expires_in},
+                    timeout=30.0,
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    return f"{self.url}/storage/v1{data.get('signedURL')}"
+                    
+        except Exception as e:
+            logger.error(f"Signed URL error: {e}")
+        
+        return None
+    
+    # =========================================================================
+    # DELETE
+    # =========================================================================
+    
+    async def delete(self, bucket: str, path: str) -> bool:
+        """Delete file from storage"""
+        if not self._is_configured():
+            key = f"{bucket}/{path}"
+            if key in self._local_files:
+                del self._local_files[key]
+                return True
+            return False
+        
+        try:
+            url = f"{self.storage_url}/object/{bucket}/{path}"
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.delete(url, headers=self.headers)
+                return response.status_code in [200, 204]
+                
+        except Exception as e:
+            logger.error(f"Storage delete error: {e}")
+            return False
+    
+    # =========================================================================
+    # HELPERS
+    # =========================================================================
+    
+    async def upload_document(
+        self,
+        file_content: bytes,
+        file_name: str,
+        content_type: str,
+        company_id: str = None,
+        project_id: str = None,
+    ) -> Dict[str, Any]:
+        """Upload a document (PDF, drawing, etc.)"""
+        return await self.upload(
+            bucket="documents",
+            file_content=file_content,
+            file_name=file_name,
+            content_type=content_type,
+            company_id=company_id,
+            project_id=project_id,
+        )
+    
+    async def upload_photo(
+        self,
+        file_content: bytes,
+        file_name: str,
+        content_type: str,
+        company_id: str = None,
+        project_id: str = None,
+    ) -> Dict[str, Any]:
+        """Upload a site photo"""
+        return await self.upload(
+            bucket="photos",
+            file_content=file_content,
+            file_name=file_name,
+            content_type=content_type,
+            company_id=company_id,
+            project_id=project_id,
+        )
+    
+    def get_storage_usage_gb(self, company_id: str = None) -> float:
+        """Get storage usage in GB (from local tracking)"""
+        total_bytes = sum(
+            len(content)
+            for key, content in self._local_files.items()
+            if not company_id or key.startswith(f"documents/{company_id}") or key.startswith(f"photos/{company_id}")
+        )
+        return total_bytes / (1024 ** 3)
 
 
 # Singleton instance

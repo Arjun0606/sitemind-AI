@@ -1,16 +1,10 @@
-# ===========================================
-# Railway.app Deployment Configuration
-# https://railway.app
-# ===========================================
+# Railway Configuration
 
 [build]
-builder = "DOCKERFILE"
+builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
-healthcheckPath = "/ping"
-healthcheckTimeout = 30
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
-
+startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+restartPolicyType = "on_failure"

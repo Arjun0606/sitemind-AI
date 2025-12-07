@@ -1,24 +1,29 @@
 """
 SiteMind Memory Service
-Long-term project memory using Supermemory.ai (with local fallback)
+Long-term project memory using Supermemory.ai
 
 SUPERMEMORY INTEGRATION:
-- API Docs: https://supermemory.ai/docs/introduction
-- Pro Plan ($19/mo): 3M tokens, 100K searches - good for start
-- Scale Plan ($399/mo): 80M tokens, 20M searches - when you grow
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-FEATURES:
-- Store project knowledge (decisions, specs, queries)
-- Semantic search across all project data
-- Automatic context retrieval
-- Audit trail with citations
-- Per-project memory spaces
+Docs: https://supermemory.ai/docs/introduction
+
+Key Concepts:
+- Add memories: Store project knowledge
+- Search: Semantic search across all memories
+- User profiles: Per-project memory spaces
+
+API Endpoints Used:
+- POST /v1/memories - Add a memory
+- POST /v1/search - Search memories
+- DELETE /v1/memories/{id} - Delete memory
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-import json
 import httpx
+import json
 
 from config import settings
 from utils.logger import logger
@@ -26,124 +31,198 @@ from utils.logger import logger
 
 class MemoryService:
     """
-    Project memory management using Supermemory.ai
-    Falls back to in-memory storage for development
+    Supermemory.ai integration for long-term project memory
     
-    SUPERMEMORY CONCEPTS:
-    - Memories: Individual pieces of information
-    - Collections: Group memories (we use 1 collection per project)
-    - Search: Semantic search across memories
+    Each project gets its own memory space (using metadata filtering)
     """
     
     def __init__(self):
         self.api_key = settings.SUPERMEMORY_API_KEY
         self.base_url = "https://api.supermemory.ai/v1"
         
-        # Track collections per project
-        self._collections: Dict[str, str] = {}  # project_id -> collection_id
+        # Headers for API calls
+        self.headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
         
-        # In-memory fallback for development
-        self._local_memory: Dict[str, List[Dict]] = {}
+        # Local fallback for development
+        self._local_memories: Dict[str, List[Dict]] = {}
     
-    async def add(
+    def _is_configured(self) -> bool:
+        """Check if Supermemory is configured"""
+        return (
+            self.api_key and 
+            self.api_key != "your_supermemory_api_key" and
+            len(self.api_key) > 10
+        )
+    
+    # =========================================================================
+    # ADD MEMORIES
+    # =========================================================================
+    
+    async def add_memory(
         self,
         project_id: str,
         content: str,
-        content_type: str,
+        memory_type: str,
         metadata: Dict = None,
-        source: str = None,
         user_id: str = None,
     ) -> Dict[str, Any]:
         """
-        Add content to project memory
+        Add a memory to the project
         
         Args:
-            project_id: Project identifier
-            content: Text content to store
-            content_type: Type (decision, change_order, rfi, query, instruction, etc.)
+            project_id: Project identifier (used for filtering)
+            content: The content to remember
+            memory_type: Type of memory (decision, query, document, etc.)
             metadata: Additional structured data
-            source: Where this came from (whatsapp, dashboard, email)
-            user_id: Who added this
+            user_id: Who added this memory
             
         Returns:
             Memory record with ID
         """
-        memory_record = {
-            "id": f"mem_{datetime.utcnow().timestamp():.0f}",
-            "project_id": project_id,
+        memory_data = {
             "content": content,
-            "content_type": content_type,
-            "metadata": metadata or {},
-            "source": source or "unknown",
-            "user_id": user_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "metadata": {
+                "project_id": project_id,
+                "type": memory_type,
+                "user_id": user_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                **(metadata or {}),
+            },
         }
         
-        # Try Supermemory API
-        if self.api_key and self.api_key != "your_supermemory_api_key":
+        if self._is_configured():
             try:
-                result = await self._add_to_supermemory(project_id, memory_record)
-                logger.info(f"💾 Memory added to Supermemory: {content[:50]}...")
-                return result
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{self.base_url}/memories",
+                        headers=self.headers,
+                        json=memory_data,
+                        timeout=30.0,
+                    )
+                    
+                    if response.status_code in [200, 201]:
+                        result = response.json()
+                        logger.info(f"💾 Memory added to Supermemory: {content[:50]}...")
+                        return {
+                            "id": result.get("id"),
+                            "status": "stored",
+                            "provider": "supermemory",
+                            **memory_data,
+                        }
+                    else:
+                        logger.error(f"Supermemory error: {response.status_code} - {response.text}")
+                        
             except Exception as e:
-                logger.warning(f"Supermemory error, using local: {e}")
+                logger.error(f"Supermemory API error: {e}")
         
-        # Fallback to local memory
-        if project_id not in self._local_memory:
-            self._local_memory[project_id] = []
+        # Fallback to local storage
+        return self._add_local(project_id, memory_data)
+    
+    def _add_local(self, project_id: str, memory_data: Dict) -> Dict:
+        """Add to local memory (fallback)"""
+        if project_id not in self._local_memories:
+            self._local_memories[project_id] = []
         
-        self._local_memory[project_id].append(memory_record)
-        logger.info(f"💾 Memory added locally: {content[:50]}...")
+        memory = {
+            "id": f"local_{datetime.utcnow().timestamp():.0f}",
+            "status": "stored_locally",
+            "provider": "local",
+            **memory_data,
+        }
         
-        return memory_record
+        self._local_memories[project_id].append(memory)
+        logger.info(f"💾 Memory added locally: {memory_data['content'][:50]}...")
+        
+        return memory
+    
+    # =========================================================================
+    # SEARCH MEMORIES
+    # =========================================================================
     
     async def search(
         self,
         project_id: str,
         query: str,
         limit: int = 5,
-        content_types: List[str] = None,
+        memory_types: List[str] = None,
     ) -> List[Dict]:
         """
-        Search project memory
+        Search memories for a project
         
         Args:
-            project_id: Project identifier
-            query: Search query
-            limit: Maximum results
-            content_types: Filter by type (decision, query, etc.)
+            project_id: Project to search in
+            query: Search query (semantic search)
+            limit: Max results
+            memory_types: Filter by type (decision, query, etc.)
             
         Returns:
-            List of matching memory records
+            List of matching memories
         """
-        # Try Supermemory API
-        if self.api_key and self.api_key != "your_supermemory_api_key":
+        if self._is_configured():
             try:
-                results = await self._search_supermemory(project_id, query, limit)
-                logger.info(f"🔍 Supermemory search: {query[:30]}... ({len(results)} results)")
-                return results
+                async with httpx.AsyncClient() as client:
+                    search_payload = {
+                        "query": query,
+                        "limit": limit,
+                        "filter": {
+                            "project_id": project_id,
+                        },
+                    }
+                    
+                    if memory_types:
+                        search_payload["filter"]["type"] = {"$in": memory_types}
+                    
+                    response = await client.post(
+                        f"{self.base_url}/search",
+                        headers=self.headers,
+                        json=search_payload,
+                        timeout=30.0,
+                    )
+                    
+                    if response.status_code == 200:
+                        results = response.json().get("results", [])
+                        logger.info(f"🔍 Supermemory search: '{query[:30]}...' → {len(results)} results")
+                        return results
+                    else:
+                        logger.error(f"Supermemory search error: {response.status_code}")
+                        
             except Exception as e:
-                logger.warning(f"Supermemory search error, using local: {e}")
+                logger.error(f"Supermemory search error: {e}")
         
         # Fallback to local search
-        memories = self._local_memory.get(project_id, [])
+        return self._search_local(project_id, query, limit)
+    
+    def _search_local(self, project_id: str, query: str, limit: int) -> List[Dict]:
+        """Search local memories (fallback)"""
+        memories = self._local_memories.get(project_id, [])
         
         # Simple keyword matching
         query_lower = query.lower()
-        matches = []
+        query_words = query_lower.split()
         
-        for mem in memories:
-            content = mem.get("content", "").lower()
-            if query_lower in content or any(word in content for word in query_lower.split()):
-                if content_types is None or mem.get("content_type") in content_types:
-                    matches.append(mem)
+        scored = []
+        for memory in memories:
+            content = memory.get("content", "").lower()
+            
+            # Score by keyword matches
+            score = sum(1 for word in query_words if word in content)
+            if score > 0:
+                scored.append((score, memory))
         
-        # Sort by recency
-        matches.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        # Sort by score descending
+        scored.sort(key=lambda x: -x[0])
         
-        logger.info(f"🔍 Local search: {query[:30]}... ({len(matches[:limit])} results)")
+        results = [m for _, m in scored[:limit]]
+        logger.info(f"🔍 Local search: '{query[:30]}...' → {len(results)} results")
         
-        return matches[:limit]
+        return results
+    
+    # =========================================================================
+    # SPECIALIZED ADD METHODS
+    # =========================================================================
     
     async def add_decision(
         self,
@@ -152,35 +231,25 @@ class MemoryService:
         reason: str = None,
         approved_by: str = None,
         affected_area: str = None,
-        old_value: str = None,
-        new_value: str = None,
         user_id: str = None,
-        source: str = "whatsapp",
-    ) -> Dict[str, Any]:
-        """
-        Add a project decision to memory
-        """
+    ) -> Dict:
+        """Add a project decision"""
         content = f"Decision: {decision}"
         if reason:
             content += f"\nReason: {reason}"
-        if old_value and new_value:
-            content += f"\nChanged from: {old_value} to: {new_value}"
+        if approved_by:
+            content += f"\nApproved by: {approved_by}"
         
-        metadata = {
-            "decision": decision,
-            "reason": reason,
-            "approved_by": approved_by,
-            "affected_area": affected_area,
-            "old_value": old_value,
-            "new_value": new_value,
-        }
-        
-        return await self.add(
+        return await self.add_memory(
             project_id=project_id,
             content=content,
-            content_type="decision",
-            metadata=metadata,
-            source=source,
+            memory_type="decision",
+            metadata={
+                "decision": decision,
+                "reason": reason,
+                "approved_by": approved_by,
+                "affected_area": affected_area,
+            },
             user_id=user_id,
         )
     
@@ -188,40 +257,28 @@ class MemoryService:
         self,
         project_id: str,
         description: str,
-        affected_element: str,
-        old_spec: str = None,
-        new_spec: str = None,
+        old_spec: str,
+        new_spec: str,
         reason: str = None,
-        approved_by: str = None,
         user_id: str = None,
-    ) -> Dict[str, Any]:
-        """
-        Add a change order to memory
-        """
+    ) -> Dict:
+        """Add a change order"""
         content = f"Change Order: {description}\n"
-        content += f"Element: {affected_element}\n"
-        if old_spec:
-            content += f"Previous: {old_spec}\n"
-        if new_spec:
-            content += f"New: {new_spec}\n"
+        content += f"Changed from: {old_spec}\n"
+        content += f"Changed to: {new_spec}"
         if reason:
-            content += f"Reason: {reason}"
+            content += f"\nReason: {reason}"
         
-        metadata = {
-            "description": description,
-            "affected_element": affected_element,
-            "old_spec": old_spec,
-            "new_spec": new_spec,
-            "reason": reason,
-            "approved_by": approved_by,
-        }
-        
-        return await self.add(
+        return await self.add_memory(
             project_id=project_id,
             content=content,
-            content_type="change_order",
-            metadata=metadata,
-            source="whatsapp",
+            memory_type="change_order",
+            metadata={
+                "description": description,
+                "old_spec": old_spec,
+                "new_spec": new_spec,
+                "reason": reason,
+            },
             user_id=user_id,
         )
     
@@ -229,65 +286,50 @@ class MemoryService:
         self,
         project_id: str,
         question: str,
-        from_user: str,
-        to_consultant: str = None,
-        response: str = None,
-        response_by: str = None,
+        answer: str = None,
+        asked_by: str = None,
+        answered_by: str = None,
         user_id: str = None,
-    ) -> Dict[str, Any]:
-        """
-        Add an RFI to memory
-        """
-        content = f"RFI: {question}\n"
-        content += f"From: {from_user}\n"
-        if to_consultant:
-            content += f"To: {to_consultant}\n"
-        if response:
-            content += f"Response: {response}\n"
-            if response_by:
-                content += f"Answered by: {response_by}"
+    ) -> Dict:
+        """Add an RFI (Request for Information)"""
+        content = f"RFI: {question}"
+        if answer:
+            content += f"\nAnswer: {answer}"
+            if answered_by:
+                content += f"\n(Answered by {answered_by})"
         
-        metadata = {
-            "question": question,
-            "from_user": from_user,
-            "to_consultant": to_consultant,
-            "response": response,
-            "response_by": response_by,
-            "status": "answered" if response else "pending",
-        }
-        
-        return await self.add(
+        return await self.add_memory(
             project_id=project_id,
             content=content,
-            content_type="rfi",
-            metadata=metadata,
-            source="whatsapp",
+            memory_type="rfi",
+            metadata={
+                "question": question,
+                "answer": answer,
+                "asked_by": asked_by,
+                "answered_by": answered_by,
+                "status": "answered" if answer else "pending",
+            },
             user_id=user_id,
         )
     
-    async def add_whatsapp_query(
+    async def add_query(
         self,
         project_id: str,
         question: str,
         answer: str,
         user_id: str = None,
-    ) -> Dict[str, Any]:
-        """
-        Add a WhatsApp Q&A to memory for context
-        """
+    ) -> Dict:
+        """Add a Q&A from WhatsApp"""
         content = f"Q: {question}\nA: {answer}"
         
-        metadata = {
-            "question": question,
-            "answer": answer,
-        }
-        
-        return await self.add(
+        return await self.add_memory(
             project_id=project_id,
             content=content,
-            content_type="query",
-            metadata=metadata,
-            source="whatsapp",
+            memory_type="query",
+            metadata={
+                "question": question,
+                "answer": answer,
+            },
             user_id=user_id,
         )
     
@@ -296,114 +338,77 @@ class MemoryService:
         project_id: str,
         document_name: str,
         document_type: str,
-        extracted_content: str,
+        extracted_text: str,
         file_path: str = None,
         user_id: str = None,
-    ) -> Dict[str, Any]:
-        """
-        Add document content to memory
-        """
+    ) -> Dict:
+        """Add document content to memory"""
         content = f"Document: {document_name}\n"
         content += f"Type: {document_type}\n"
-        content += f"Content:\n{extracted_content}"
+        content += f"Content:\n{extracted_text}"
         
-        metadata = {
-            "document_name": document_name,
-            "document_type": document_type,
-            "file_path": file_path,
-        }
-        
-        return await self.add(
+        return await self.add_memory(
             project_id=project_id,
             content=content,
-            content_type="document",
-            metadata=metadata,
-            source="upload",
+            memory_type="document",
+            metadata={
+                "document_name": document_name,
+                "document_type": document_type,
+                "file_path": file_path,
+            },
             user_id=user_id,
         )
     
-    async def get_context_for_query(
+    # =========================================================================
+    # CONTEXT RETRIEVAL
+    # =========================================================================
+    
+    async def get_context(
         self,
         project_id: str,
         query: str,
+        include_types: List[str] = None,
     ) -> List[Dict]:
         """
         Get relevant context for answering a query
+        
+        Combines:
+        - Semantic search results
+        - Recent decisions
+        - Recent change orders
         """
         # Search for relevant memories
-        results = await self.search(project_id, query, limit=5)
+        search_results = await self.search(
+            project_id=project_id,
+            query=query,
+            limit=5,
+            memory_types=include_types,
+        )
         
-        # Also get recent decisions and change orders
-        all_memories = self._local_memory.get(project_id, [])
-        recent_decisions = [
-            m for m in all_memories
-            if m.get("content_type") in ["decision", "change_order"]
-        ][-3:]  # Last 3
-        
-        # Combine, deduplicate
-        seen_ids = set()
-        combined = []
-        
-        for item in results + recent_decisions:
-            if item["id"] not in seen_ids:
-                seen_ids.add(item["id"])
-                combined.append(item)
-        
-        return combined[:5]
-    
-    # =========================================================================
-    # SUPERMEMORY API METHODS
-    # =========================================================================
-    
-    async def _add_to_supermemory(self, project_id: str, record: Dict) -> Dict:
-        """Add memory to Supermemory API"""
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/memories",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={
-                    "content": record["content"],
-                    "metadata": {
-                        **record["metadata"],
-                        "project_id": project_id,
-                        "content_type": record["content_type"],
-                        "source": record["source"],
-                    }
-                }
+        # Also get recent important items
+        if not include_types or "decision" in include_types:
+            decisions = await self.search(
+                project_id=project_id,
+                query="decision change",
+                limit=3,
+                memory_types=["decision", "change_order"],
             )
             
-            if response.status_code in [200, 201]:
-                return response.json()
-            else:
-                raise Exception(f"Supermemory error: {response.status_code}")
-    
-    async def _search_supermemory(self, project_id: str, query: str, limit: int) -> List[Dict]:
-        """Search Supermemory API"""
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/search",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={
-                    "query": query,
-                    "limit": limit,
-                    "filter": {
-                        "project_id": project_id,
-                    }
-                }
-            )
-            
-            if response.status_code == 200:
-                return response.json().get("results", [])
-            else:
-                raise Exception(f"Supermemory search error: {response.status_code}")
+            # Merge and dedupe
+            seen_ids = {r.get("id") for r in search_results}
+            for d in decisions:
+                if d.get("id") not in seen_ids:
+                    search_results.append(d)
+        
+        return search_results[:7]  # Max 7 context items
     
     # =========================================================================
     # STATS
     # =========================================================================
     
-    def get_memory_stats(self, project_id: str) -> Dict[str, int]:
-        """Get memory statistics for a project"""
-        memories = self._local_memory.get(project_id, [])
+    def get_stats(self, project_id: str) -> Dict[str, int]:
+        """Get memory stats for a project"""
+        memories = self._local_memories.get(project_id, [])
         
         stats = {
             "total": len(memories),
@@ -414,10 +419,10 @@ class MemoryService:
             "documents": 0,
         }
         
-        for mem in memories:
-            content_type = mem.get("content_type", "other")
-            if content_type in stats:
-                stats[content_type] += 1
+        for m in memories:
+            mem_type = m.get("metadata", {}).get("type", "other")
+            if mem_type in stats:
+                stats[mem_type] += 1
         
         return stats
 

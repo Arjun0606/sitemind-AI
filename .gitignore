@@ -1,12 +1,8 @@
-# ===========================================
-# SiteMind .gitignore
-# ===========================================
-
 # Environment
 .env
-.env.local
-.env.*.local
 *.env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -14,77 +10,36 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
 venv/
 ENV/
-env/
 .venv/
+
+# Logs
+logs/
+*.log
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-*~
 .DS_Store
 
-# Logs
-logs/
-*.log
+# Build
+dist/
+build/
+*.egg-info/
+
+# Node (dashboard)
+node_modules/
+.next/
+out/
 
 # Testing
-.pytest_cache/
 .coverage
 htmlcov/
-.tox/
-.nox/
+.pytest_cache/
 
-# Database
-*.db
-*.sqlite3
-
-# Temporary files
-tmp/
-temp/
+# Misc
+*.bak
 *.tmp
-
-# Uploaded files (in development)
-uploads/
-blueprints/
-
-# Secrets
-*.pem
-*.key
-secrets/
-
-# Compiled
-*.pyc
-*.pyo
-*.pyd
-
-# Distribution
-*.tar.gz
-*.zip
-
-# Jupyter
-.ipynb_checkpoints/
-
-# mypy
-.mypy_cache/
-
