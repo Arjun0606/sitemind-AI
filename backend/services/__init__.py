@@ -9,6 +9,7 @@ from services.storage_service import storage_service
 from services.pricing_service import pricing_service
 from services.billing_service import billing_service
 from services.wow_service import wow_service
+from services.intelligence_service import intelligence_service
 
 __all__ = [
     "gemini_service",
@@ -18,4 +19,5 @@ __all__ = [
     "pricing_service",
     "billing_service",
     "wow_service",
+    "intelligence_service",
 ]

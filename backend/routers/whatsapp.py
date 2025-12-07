@@ -14,6 +14,7 @@ from services import (
     storage_service,
     billing_service,
     wow_service,
+    intelligence_service,
 )
 from database import db
 from utils.logger import logger
@@ -126,6 +127,21 @@ async def handle_query(
     )
     
     answer = response.get("answer", "Sorry, I couldn't process that.")
+    
+    # INTELLIGENCE ENHANCEMENT - This is the $100k/month magic
+    enhanced = await intelligence_service.enhance_response(
+        question=question,
+        answer=answer,
+        context=context,
+        project_id=company_id,
+    )
+    answer = enhanced["answer"]
+    
+    # Track safety flags (WOW moment!)
+    if enhanced.get("alerts"):
+        for alert in enhanced["alerts"]:
+            if alert["type"] == "safety":
+                wow_service.track_safety_flag(user_id, company_id)
     
     # Check for code references (WOW moment!)
     has_code_ref = any(code in answer.lower() for code in ["is ", "is:", "nbc", "code"])
