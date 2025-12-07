@@ -1,18 +1,15 @@
 """
 SiteMind Smart Assistant
-Makes the product ADDICTIVE - handles every edge case
+Enterprise-grade query processing with edge case handling
 
-ADDICTION FEATURES:
-1. Multi-language (Hindi-English code switching)
+FEATURES:
+1. Multi-language support (Hindi-English code switching)
 2. Typo tolerance ("beem" → "beam")
-3. Context memory (follow-up questions work)
-4. Ambiguity resolution (asks clarifying questions)
+3. Context memory (follow-up questions)
+4. Ambiguity resolution (clarifying questions)
 5. Conflict detection (flags contradictions)
 6. Urgency detection (prioritizes critical queries)
-7. Proactive alerts (notifies about updates)
-8. Smart suggestions (anticipates needs)
-9. Frustration detection (adjusts tone)
-10. Daily/weekly value summaries
+7. Professional response formatting
 """
 
 import re
@@ -444,62 +441,41 @@ class SmartAssistant:
         return ""
     
     # =========================================================================
-    # GAMIFICATION & ENGAGEMENT
+    # USER METRICS (Professional, no gamification)
     # =========================================================================
     
     def get_user_stats(self, user_phone: str) -> Dict[str, Any]:
-        """Get engagement stats for a user"""
+        """Get usage stats for a user"""
         if user_phone not in self._user_stats:
             self._user_stats[user_phone] = {
                 "total_queries": 0,
-                "streak_days": 0,
-                "issues_caught": 0,
-                "time_saved_minutes": 0,
+                "issues_flagged": 0,
                 "first_query_date": None,
-                "badges": [],
             }
         return self._user_stats[user_phone]
     
-    def record_query(self, user_phone: str, saved_time_minutes: int = 5):
-        """Record a query for stats"""
+    def record_query(self, user_phone: str):
+        """Record a query"""
         stats = self.get_user_stats(user_phone)
         stats["total_queries"] += 1
-        stats["time_saved_minutes"] += saved_time_minutes
         
         if not stats["first_query_date"]:
             stats["first_query_date"] = datetime.utcnow().isoformat()
-        
-        # Award badges
-        self._check_badges(user_phone)
-    
-    def _check_badges(self, user_phone: str):
-        """Check and award badges"""
-        stats = self.get_user_stats(user_phone)
-        badges = stats["badges"]
-        
-        if stats["total_queries"] >= 10 and "first_10" not in badges:
-            badges.append("first_10")
-        if stats["total_queries"] >= 100 and "century" not in badges:
-            badges.append("century")
-        if stats["streak_days"] >= 7 and "week_streak" not in badges:
-            badges.append("week_streak")
-        if stats["issues_caught"] >= 5 and "eagle_eye" not in badges:
-            badges.append("eagle_eye")
     
     # =========================================================================
     # OUT OF SCOPE HANDLING
     # =========================================================================
     
     def handle_out_of_scope(self, query: str) -> str:
-        """Handle queries that are out of scope with grace"""
+        """Handle queries that are out of scope professionally"""
         
         out_of_scope_responses = {
-            "weather": "🌤️ I'm focused on construction, not weather! But I heard it's a good day to pour concrete 😄\n\nHow can I help with the project?",
-            "cricket": "🏏 I don't follow cricket, but I can tell you the exact dimensions of any beam! What do you need?",
-            "joke": "😄 Here's a construction joke: Why did the beam go to therapy? It had too much stress!\n\nNow, any project questions?",
-            "hello": "👋 Hello! I'm SiteMind, your AI Site Engineer. I'm here 24/7 to answer questions about blueprints, specs, and project details.\n\nWhat do you need to know?",
-            "thanks": "🙏 You're welcome! Remember, I'm here 24/7. No question is too small - it's always better to check than to assume!",
-            "who are you": "🤖 I'm SiteMind - your AI Site Engineer assistant. I know everything about your project's blueprints, specs, and history.\n\nTry asking: 'Beam size at B2, floor 3?'",
+            "weather": "I'm configured to assist with construction project queries. For weather information, please use a weather service.\n\nHow can I help with the project?",
+            "cricket": "I'm configured to assist with construction project queries only.\n\nHow can I help with blueprints, specifications, or project details?",
+            "hello": "Hello. I'm SiteMind, your AI construction assistant. I can answer questions about blueprints, specifications, change orders, and project history.\n\nWhat do you need to know?",
+            "thanks": "You're welcome. Feel free to ask if you have more questions about the project.",
+            "who are you": "I'm SiteMind, an AI assistant for construction projects. I have access to your project's blueprints, specifications, RFIs, change orders, and decision history.\n\nExample query: 'Beam size at B2, floor 3'",
+            "help": "I can help with:\n• Blueprint specifications\n• Rebar and structural details\n• Change order history\n• RFI lookups\n• Site photo verification\n\nWhat do you need?",
         }
         
         query_lower = query.lower()
@@ -508,24 +484,18 @@ class SmartAssistant:
             if keyword in query_lower:
                 return response
         
-        return "I'm specialized in construction queries - blueprints, specs, materials, and project details. How can I help with the project?"
+        return "I'm configured to assist with construction project queries - blueprints, specifications, materials, and project documentation. How can I help?"
     
     # =========================================================================
-    # SMART SUGGESTIONS
+    # PROACTIVE SUGGESTIONS
     # =========================================================================
     
-    def get_smart_suggestions(self, project_id: str, recent_queries: List[str]) -> List[str]:
+    def get_suggestions(self, project_id: str, recent_queries: List[str]) -> List[str]:
         """
-        Generate smart suggestions based on patterns
-        
-        Examples:
-        - If many queries about Floor 3, suggest: "Want me to summarize all Floor 3 specs?"
-        - If it's Monday morning, suggest: "Want the weekly update report?"
+        Generate relevant suggestions based on query patterns
         """
         suggestions = []
-        
-        # Would analyze patterns and suggest helpful actions
-        
+        # Would analyze patterns and suggest relevant actions
         return suggestions
     
     # =========================================================================
@@ -543,23 +513,19 @@ class SmartAssistant:
         Enhance response based on context
         
         - Add warnings for safety queries
-        - Add encouragement for milestones
-        - Adjust tone based on urgency
+        - Adjust formatting based on urgency
+        - Keep professional tone
         """
         enhanced = response
         
-        # Safety queries get extra emphasis
+        # Safety queries get clear warning
         if category == QueryCategory.SAFETY:
-            enhanced = "⚠️ **SAFETY RELATED**\n\n" + enhanced
-            enhanced += "\n\n🦺 Always follow safety protocols. When in doubt, stop work and verify."
+            enhanced = "**⚠️ SAFETY-RELATED QUERY**\n\n" + enhanced
+            enhanced += "\n\n_Note: For safety-critical work, always verify with site supervisor and follow established protocols._"
         
-        # Urgent queries get acknowledgment
+        # Urgent queries get priority indicator
         if urgency == QueryUrgency.CRITICAL:
-            enhanced = "🚨 **URGENT RESPONSE**\n\n" + enhanced
-        
-        # Milestone celebrations
-        if user_stats.get("total_queries") == 100:
-            enhanced += "\n\n🎉 Congratulations! This is your 100th query. You've saved approximately 8+ hours using SiteMind!"
+            enhanced = "**PRIORITY RESPONSE**\n\n" + enhanced
         
         return enhanced
 
