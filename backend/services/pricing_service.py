@@ -2,64 +2,94 @@
 SiteMind Pricing Service
 Simple, transparent pricing. One product, one price.
 
-Philosophy:
-- One product with EVERYTHING included
-- No confusing tiers
-- No token/query limits - UNLIMITED usage
-- Volume discounts for multiple sites
-- Founding partner program for pilots
+PRICING TIERS:
+1. ACTIVE SITE: $500/month - Full access, unlimited queries
+2. ARCHIVED PROJECT: $50/month - Legal retention, read-only access
+
+Why archive matters:
+- Construction disputes happen 5-10 years after completion
+- Full audit trail with citations = legal protection
+- Reference for future projects
+- Compliance requirements
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from enum import Enum
+
+
+class ProjectStatus(str, Enum):
+    """Project lifecycle stages"""
+    ACTIVE = "active"           # Full access, unlimited queries
+    PAUSED = "paused"           # Temporarily paused (not billed)
+    COMPLETED = "completed"     # Project done, moving to archive
+    ARCHIVED = "archived"       # Archive tier - read-only access
 
 
 class PricingConfig:
     """
     SiteMind Pricing Configuration
     
-    Base: $500/site/month (₹41,500)
-    UNLIMITED queries - no limits, no upsells
+    ACTIVE: $500/site/month - Full power
+    ARCHIVED: $50/site/month - Legal retention
     """
     
-    # Base pricing
+    # ============================
+    # ACTIVE SITE PRICING
+    # ============================
     BASE_PRICE_USD = 500
     BASE_PRICE_INR = 41_500  # ~$500 at 83 INR/USD
     
-    # Volume discounts (simple tiers)
+    # Volume discounts for active sites
     VOLUME_DISCOUNTS = {
         3: 0.10,    # 10% off for 3+ sites
         6: 0.15,    # 15% off for 6+ sites
         10: 0.25,   # 25% off for 10+ sites
     }
     
-    # Founding partner discount (forever)
-    FOUNDING_PARTNER_DISCOUNT = 0.20  # 20% off forever
+    # ============================
+    # ARCHIVE PRICING (UPSELL!)
+    # ============================
+    ARCHIVE_PRICE_USD = 50      # $50/project/month
+    ARCHIVE_PRICE_INR = 4_150   # ₹4,150/project/month
     
-    # Pilot program
+    # Or one-time archive fee (5 years retention)
+    ARCHIVE_ONETIME_USD = 2_000    # $2,000 for 5 years
+    ARCHIVE_ONETIME_INR = 166_000  # ₹1.66 Lakhs for 5 years
+    
+    # Archive volume discounts
+    ARCHIVE_VOLUME_DISCOUNTS = {
+        5: 0.10,    # 10% off for 5+ archived projects
+        10: 0.20,   # 20% off for 10+ archived projects
+        20: 0.30,   # 30% off for 20+ archived projects
+    }
+    
+    # ============================
+    # FOUNDING PARTNER PROGRAM
+    # ============================
+    FOUNDING_PARTNER_DISCOUNT = 0.20  # 20% off forever
     PILOT_DURATION_MONTHS = 3
     PILOT_MAX_SITES = 5
-    PILOT_SLOTS_TOTAL = 3  # Only 3 founding partners
-
-
-class PilotStatus(str, Enum):
-    AVAILABLE = "available"
-    ACTIVE = "active"
-    COMPLETED = "completed"
-    CONVERTED = "converted"
+    PILOT_SLOTS_TOTAL = 3
 
 
 class PricingService:
     """
-    Handles all pricing calculations and pilot program management
+    Handles all pricing calculations
     
-    Simple pricing:
+    ACTIVE SITES:
     - $500/site/month
     - 3+ sites: 10% off
     - 6+ sites: 15% off  
     - 10+ sites: 25% off
-    - Unlimited usage, no query limits
+    - Unlimited usage
+    
+    ARCHIVED PROJECTS (Upsell):
+    - $50/project/month OR
+    - $2,000 one-time (5 years)
+    - Read-only access to all data
+    - Legal protection with audit trail
+    - Reference for future projects
     """
     
     def __init__(self):
@@ -67,20 +97,17 @@ class PricingService:
         self._pilot_partners: Dict[str, Dict] = {}
         self._pilots_used = 0
     
+    # ============================
+    # ACTIVE SITE PRICING
+    # ============================
+    
     def get_price(
         self,
         num_sites: int,
         is_founding_partner: bool = False,
         currency: str = "USD"
     ) -> Dict[str, Any]:
-        """
-        Calculate price for a given number of sites
-        
-        Args:
-            num_sites: Number of sites
-            is_founding_partner: Whether they're a founding partner (20% off forever)
-            currency: USD or INR
-        """
+        """Calculate price for active sites"""
         base_price = self.config.BASE_PRICE_USD if currency == "USD" else self.config.BASE_PRICE_INR
         
         # Apply volume discount
@@ -92,9 +119,8 @@ class PricingService:
                 volume_tier = threshold
                 break
         
-        # Apply founding partner discount (stacks with volume for founding partners)
+        # Founding partner gets better of volume or founding discount
         if is_founding_partner:
-            # Founding partners get the BETTER of volume or founding discount
             founding_discount = self.config.FOUNDING_PARTNER_DISCOUNT
             if founding_discount > volume_discount:
                 total_discount = founding_discount
@@ -106,89 +132,251 @@ class PricingService:
             total_discount = volume_discount
             discount_reason = f"volume_{volume_tier}+_sites" if volume_tier else "none"
         
-        # Calculate prices
         price_per_site = base_price * (1 - total_discount)
         total_monthly = price_per_site * num_sites
-        total_annual = total_monthly * 12
-        
-        # Savings calculation
         savings_per_site = base_price - price_per_site
-        total_savings_monthly = savings_per_site * num_sites
         
-        # Format currency
         symbol = "$" if currency == "USD" else "₹"
         
         return {
+            "tier": "active",
             "num_sites": num_sites,
             "currency": currency,
             "base_price_per_site": base_price,
-            "base_price_formatted": f"{symbol}{base_price:,.0f}",
             "discount_percent": total_discount * 100,
-            "discount_applied": f"{total_discount * 100:.0f}%" if total_discount > 0 else "None",
             "discount_reason": discount_reason,
             "price_per_site": price_per_site,
             "price_per_site_formatted": f"{symbol}{price_per_site:,.0f}",
             "total_monthly": total_monthly,
             "total_monthly_formatted": f"{symbol}{total_monthly:,.0f}",
-            "total_annual": total_annual,
-            "total_annual_formatted": f"{symbol}{total_annual:,.0f}",
+            "total_annual": total_monthly * 12,
             "savings_per_site": savings_per_site,
-            "savings_per_site_formatted": f"{symbol}{savings_per_site:,.0f}" if savings_per_site > 0 else "N/A",
-            "total_savings_monthly": total_savings_monthly,
-            "total_savings_formatted": f"{symbol}{total_savings_monthly:,.0f}/month" if total_savings_monthly > 0 else "N/A",
             "usage": "UNLIMITED - No query limits",
         }
     
-    def get_pricing_table(self, currency: str = "USD") -> Dict[str, Any]:
+    # ============================
+    # ARCHIVE PRICING (UPSELL!)
+    # ============================
+    
+    def get_archive_price(
+        self,
+        num_projects: int,
+        payment_type: str = "monthly",  # "monthly" or "onetime"
+        currency: str = "USD"
+    ) -> Dict[str, Any]:
         """
-        Get the complete pricing table for display
+        Calculate archive pricing for completed projects
+        
+        GREAT UPSELL because:
+        - Construction disputes happen 5-10 years later
+        - All decisions, changes, approvals preserved
+        - Legal protection with full citations
+        - Low cost to us (just storage)
+        - High value to builder
         """
+        if payment_type == "onetime":
+            base_price = self.config.ARCHIVE_ONETIME_USD if currency == "USD" else self.config.ARCHIVE_ONETIME_INR
+            period = "5 years"
+        else:
+            base_price = self.config.ARCHIVE_PRICE_USD if currency == "USD" else self.config.ARCHIVE_PRICE_INR
+            period = "month"
+        
+        # Apply volume discount
+        volume_discount = 0
+        for threshold, discount in sorted(self.config.ARCHIVE_VOLUME_DISCOUNTS.items(), reverse=True):
+            if num_projects >= threshold:
+                volume_discount = discount
+                break
+        
+        price_per_project = base_price * (1 - volume_discount)
+        total = price_per_project * num_projects
+        
         symbol = "$" if currency == "USD" else "₹"
-        base = self.config.BASE_PRICE_USD if currency == "USD" else self.config.BASE_PRICE_INR
         
         return {
-            "base_price": f"{symbol}{base:,.0f}/site/month",
-            "volume_discounts": [
-                {
-                    "sites": "1-2 sites",
-                    "discount": "0%",
-                    "price_per_site": f"{symbol}{base:,.0f}",
-                },
-                {
-                    "sites": "3-5 sites",
-                    "discount": "10%",
-                    "price_per_site": f"{symbol}{base * 0.90:,.0f}",
-                },
-                {
-                    "sites": "6-9 sites",
-                    "discount": "15%",
-                    "price_per_site": f"{symbol}{base * 0.85:,.0f}",
-                },
-                {
-                    "sites": "10+ sites",
-                    "discount": "25%",
-                    "price_per_site": f"{symbol}{base * 0.75:,.0f}",
-                },
-            ],
+            "tier": "archive",
+            "num_projects": num_projects,
+            "payment_type": payment_type,
+            "currency": currency,
+            "base_price": base_price,
+            "discount_percent": volume_discount * 100,
+            "price_per_project": price_per_project,
+            "price_per_project_formatted": f"{symbol}{price_per_project:,.0f}/{period}",
+            "total": total,
+            "total_formatted": f"{symbol}{total:,.0f}",
+            "period": period,
             "whats_included": [
-                "✅ UNLIMITED AI queries",
-                "✅ Unlimited engineers per site",
-                "✅ Blueprint analysis (Gemini 2.5 Pro)",
-                "✅ Site photo verification",
-                "✅ Complete audit trail with citations",
-                "✅ Weekly & monthly reports",
-                "✅ Conflict detection",
-                "✅ ROI dashboard",
-                "✅ WhatsApp support",
-                "✅ No hidden fees, no query limits",
+                "✅ Full read-only access to all project data",
+                "✅ Complete audit trail preserved",
+                "✅ All decisions with citations",
+                "✅ All change orders & RFIs",
+                "✅ All WhatsApp conversation history",
+                "✅ Export to PDF/Excel anytime",
+                "✅ Legal-ready documentation",
+                "✅ Reference for future projects",
             ],
-            "terms": [
-                "Monthly billing, cancel anytime",
-                "Each site = separate subscription",
-                "Volume discounts applied automatically",
-                "Annual billing available (2 months free)",
+            "why_archive": [
+                "⚖️ Legal disputes can happen 5-10 years later",
+                "📋 Compliance & audit requirements",
+                "🔍 Reference specs for similar projects",
+                "📜 Proof of decisions & approvals",
             ],
         }
+    
+    def get_archive_pricing_table(self, currency: str = "USD") -> Dict[str, Any]:
+        """Get archive pricing table for display"""
+        symbol = "$" if currency == "USD" else "₹"
+        monthly = self.config.ARCHIVE_PRICE_USD if currency == "USD" else self.config.ARCHIVE_PRICE_INR
+        onetime = self.config.ARCHIVE_ONETIME_USD if currency == "USD" else self.config.ARCHIVE_ONETIME_INR
+        
+        return {
+            "options": [
+                {
+                    "name": "Monthly Archive",
+                    "price": f"{symbol}{monthly:,.0f}/project/month",
+                    "best_for": "Projects that might need frequent access",
+                    "features": [
+                        "Cancel anytime",
+                        "Full read-only access",
+                        "Export capabilities",
+                    ],
+                },
+                {
+                    "name": "5-Year Archive",
+                    "price": f"{symbol}{onetime:,.0f} one-time",
+                    "best_for": "Long-term legal protection",
+                    "savings": f"Save {symbol}{(monthly * 60) - onetime:,.0f} vs monthly",
+                    "features": [
+                        "Pay once, 5 years access",
+                        "Full read-only access",
+                        "Export capabilities",
+                        "Best value for legal retention",
+                    ],
+                },
+            ],
+            "volume_discounts": [
+                {"projects": "5+", "discount": "10%"},
+                {"projects": "10+", "discount": "20%"},
+                {"projects": "20+", "discount": "30%"},
+            ],
+        }
+    
+    # ============================
+    # COMPLETE PRICING TABLE
+    # ============================
+    
+    def get_full_pricing_table(self, currency: str = "USD") -> Dict[str, Any]:
+        """Get complete pricing table with both tiers"""
+        symbol = "$" if currency == "USD" else "₹"
+        base = self.config.BASE_PRICE_USD if currency == "USD" else self.config.BASE_PRICE_INR
+        archive = self.config.ARCHIVE_PRICE_USD if currency == "USD" else self.config.ARCHIVE_PRICE_INR
+        
+        return {
+            "active_sites": {
+                "description": "Full power for construction in progress",
+                "base_price": f"{symbol}{base:,.0f}/site/month",
+                "volume_discounts": [
+                    {"sites": "1-2", "discount": "0%", "price": f"{symbol}{base:,.0f}"},
+                    {"sites": "3-5", "discount": "10%", "price": f"{symbol}{base * 0.90:,.0f}"},
+                    {"sites": "6-9", "discount": "15%", "price": f"{symbol}{base * 0.85:,.0f}"},
+                    {"sites": "10+", "discount": "25%", "price": f"{symbol}{base * 0.75:,.0f}"},
+                ],
+                "includes": [
+                    "UNLIMITED AI queries",
+                    "Unlimited engineers",
+                    "Gemini 3.0 Pro (best AI)",
+                    "Site photo verification",
+                    "Complete audit trail",
+                    "Auto reports",
+                    "WhatsApp integration",
+                    "Web dashboard",
+                ],
+            },
+            "archived_projects": {
+                "description": "Legal retention after project completion",
+                "monthly_price": f"{symbol}{archive:,.0f}/project/month",
+                "onetime_price": f"{symbol}{self.config.ARCHIVE_ONETIME_USD if currency == 'USD' else self.config.ARCHIVE_ONETIME_INR:,.0f} (5 years)",
+                "volume_discounts": [
+                    {"projects": "5+", "discount": "10%"},
+                    {"projects": "10+", "discount": "20%"},
+                    {"projects": "20+", "discount": "30%"},
+                ],
+                "includes": [
+                    "Read-only access to all data",
+                    "Full audit trail preserved",
+                    "All decisions & citations",
+                    "Export to PDF/Excel",
+                    "Legal-ready documentation",
+                ],
+                "why": [
+                    "Legal disputes happen years later",
+                    "Compliance requirements",
+                    "Reference for future projects",
+                ],
+            },
+        }
+    
+    # ============================
+    # PROJECT LIFECYCLE
+    # ============================
+    
+    def transition_to_archive(
+        self,
+        project_id: str,
+        project_name: str,
+        completion_date: str,
+        payment_type: str = "monthly",
+        currency: str = "USD",
+    ) -> Dict[str, Any]:
+        """
+        Transition a completed project to archive tier
+        
+        Called when:
+        - Project construction is completed
+        - Builder wants to retain data for legal/reference
+        """
+        archive_pricing = self.get_archive_price(1, payment_type, currency)
+        
+        return {
+            "project_id": project_id,
+            "project_name": project_name,
+            "previous_status": ProjectStatus.ACTIVE,
+            "new_status": ProjectStatus.ARCHIVED,
+            "completion_date": completion_date,
+            "archive_started": datetime.utcnow().isoformat(),
+            "pricing": archive_pricing,
+            "message": f"""
+🏗️ Project Completed: {project_name}
+
+Your project has been moved to Archive status.
+
+WHAT'S PRESERVED:
+✅ All {archive_pricing['whats_included'][0].split('✅ ')[1]}
+✅ Complete decision history
+✅ All change orders & RFIs
+✅ Full audit trail with citations
+✅ WhatsApp conversation history
+
+ARCHIVE PRICING:
+{archive_pricing['price_per_project_formatted']}
+
+WHY KEEP ARCHIVE:
+⚖️ Legal disputes can happen 5-10 years later
+📋 All approvals and decisions documented
+📜 Export anytime for compliance
+
+To access archive: Use dashboard (read-only)
+            """,
+            "next_steps": [
+                "Confirm archive subscription",
+                "Download full project export (optional)",
+                "Data preserved indefinitely while subscribed",
+            ],
+        }
+    
+    # ============================
+    # PILOT PROGRAM (unchanged)
+    # ============================
     
     def create_pilot(
         self,
@@ -198,178 +386,114 @@ class PricingService:
         contact_phone: str,
         sites: list,
     ) -> Dict[str, Any]:
-        """
-        Create a founding partner pilot (3 months free)
-        
-        Limited to 3 builders total!
-        """
-        # Check if slots available
+        """Create a founding partner pilot (3 months free)"""
         if self._pilots_used >= self.config.PILOT_SLOTS_TOTAL:
             return {
                 "success": False,
                 "error": "All founding partner slots are taken",
-                "message": "We only offer 3 founding partner slots. Regular pricing applies.",
             }
         
-        # Check site limit
         if len(sites) > self.config.PILOT_MAX_SITES:
             return {
                 "success": False,
                 "error": f"Pilot limited to {self.config.PILOT_MAX_SITES} sites",
-                "message": f"Please select up to {self.config.PILOT_MAX_SITES} sites for the pilot.",
             }
         
-        # Create pilot
         pilot_id = f"pilot_{builder_id}"
         start_date = datetime.utcnow()
-        end_date = start_date + timedelta(days=90)  # 3 months
+        end_date = start_date + timedelta(days=90)
         
-        # Calculate pilot value
         pilot_value_usd = self.config.BASE_PRICE_USD * len(sites) * 3
-        pilot_value_inr = self.config.BASE_PRICE_INR * len(sites) * 3
         
         pilot = {
             "pilot_id": pilot_id,
             "builder_id": builder_id,
             "builder_name": builder_name,
-            "contact_name": contact_name,
-            "contact_phone": contact_phone,
             "sites": sites,
             "num_sites": len(sites),
-            "status": PilotStatus.ACTIVE,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
-            "pilot_value_usd": f"${pilot_value_usd:,}",
-            "pilot_value_inr": f"₹{pilot_value_inr:,}",
-            "founding_partner_discount": "20% forever after pilot",
+            "pilot_value": f"${pilot_value_usd:,}",
+            "founding_partner_discount": "20% forever",
         }
         
         self._pilot_partners[builder_id] = pilot
         self._pilots_used += 1
         
-        # Calculate post-pilot pricing
-        post_pilot_pricing = self.get_price(len(sites), is_founding_partner=True)
-        
         return {
             "success": True,
             "pilot": pilot,
-            "message": f"🎉 Welcome to the Founding Partner Program, {builder_name}!",
-            "what_you_get": [
-                f"✅ Full SiteMind access for {len(sites)} sites",
-                "✅ 3 months completely FREE",
-                "✅ UNLIMITED queries - no limits",
-                "✅ Direct WhatsApp access to founder",
-                "✅ 20% discount forever after pilot",
-            ],
-            "what_we_ask": [
-                "📝 Weekly 15-min feedback call",
-                "📸 Permission to use as case study (optional)",
-                "🤝 Honest review after pilot",
-            ],
-            "pilot_value": f"${pilot_value_usd:,} ({pilot_value_inr:,} INR) - FREE for you",
-            "after_pilot": {
-                "price_per_site": post_pilot_pricing["price_per_site_formatted"],
-                "total_monthly": post_pilot_pricing["total_monthly_formatted"],
-                "discount": "20% founding partner discount (forever)",
-            },
             "slots_remaining": self.config.PILOT_SLOTS_TOTAL - self._pilots_used,
         }
     
-    def get_pilot_status(self) -> Dict[str, Any]:
-        """
-        Get status of pilot program
-        """
-        return {
-            "total_slots": self.config.PILOT_SLOTS_TOTAL,
-            "slots_used": self._pilots_used,
-            "slots_remaining": self.config.PILOT_SLOTS_TOTAL - self._pilots_used,
-            "active_pilots": [
-                {
-                    "builder_name": p["builder_name"],
-                    "num_sites": p["num_sites"],
-                    "end_date": p["end_date"],
-                    "status": p["status"],
-                }
-                for p in self._pilot_partners.values()
-            ],
-        }
+    # ============================
+    # QUOTE GENERATION
+    # ============================
     
     def generate_quote(
         self,
         builder_name: str,
-        num_sites: int,
+        num_active_sites: int,
+        num_archived_projects: int = 0,
         is_founding_partner: bool = False,
         currency: str = "USD",
     ) -> str:
-        """
-        Generate a shareable quote for a builder
-        """
-        pricing = self.get_price(num_sites, is_founding_partner, currency)
+        """Generate a complete quote including active + archived"""
         symbol = "$" if currency == "USD" else "₹"
         
-        discount_line = ""
-        if pricing["discount_percent"] > 0:
-            discount_line = f"""
-Discount: {pricing['discount_applied']} ({pricing['discount_reason']})
-You Save: {pricing['total_savings_formatted']}
+        # Active sites pricing
+        active = self.get_price(num_active_sites, is_founding_partner, currency)
+        
+        # Archive pricing (if any)
+        archive_section = ""
+        archive_total = 0
+        if num_archived_projects > 0:
+            archive = self.get_archive_price(num_archived_projects, "monthly", currency)
+            archive_total = archive["total"]
+            archive_section = f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ARCHIVED PROJECTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Archived Projects: {num_archived_projects}
+Price: {archive['price_per_project_formatted']}
+Archive Monthly: {archive['total_formatted']}
+
+(Legal retention, read-only access)
 """
         
+        grand_total = active["total_monthly"] + archive_total
+        
         quote = f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        SITEMIND QUOTE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          SITEMIND QUOTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Prepared for: {builder_name}
 Date: {datetime.utcnow().strftime("%d %B %Y")}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PRICING
+ACTIVE SITES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Sites: {num_sites}
-Base Price: {pricing['base_price_formatted']}/site/month
-{discount_line}
-Price per site: {pricing['price_per_site_formatted']}/month
+Active Sites: {num_active_sites}
+Base Price: {symbol}{active['base_price_per_site']:,.0f}/site/month
+Discount: {active['discount_percent']:.0f}%
+Your Price: {active['price_per_site_formatted']}/site/month
 
+Active Monthly: {active['total_monthly_formatted']}
+
+✅ UNLIMITED AI queries
+✅ Gemini 3.0 Pro (best AI)
+✅ Complete audit trail
+✅ WhatsApp + Dashboard
+{archive_section}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOTAL
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-MONTHLY TOTAL: {pricing['total_monthly_formatted']}
-ANNUAL TOTAL: {pricing['total_annual_formatted']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WHAT'S INCLUDED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-✅ UNLIMITED AI queries (no limits!)
-✅ Unlimited engineers per site
-✅ Blueprint analysis (Gemini 2.5 Pro)
-✅ Site photo verification
-✅ Complete audit trail with citations
-✅ Weekly & monthly reports
-✅ Conflict detection
-✅ ROI dashboard
-✅ WhatsApp support
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-VOLUME DISCOUNTS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-3+ sites:  10% off
-6+ sites:  15% off
-10+ sites: 25% off
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TERMS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-• Monthly billing, cancel anytime
-• Each construction site = 1 subscription
-• No hidden fees, no query limits
-• Annual billing: 2 months free
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Questions? WhatsApp: +91-XXXXXXXXXX
+MONTHLY TOTAL: {symbol}{grand_total:,.0f}
+ANNUAL TOTAL: {symbol}{grand_total * 12:,.0f}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """

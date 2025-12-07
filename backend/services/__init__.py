@@ -1,13 +1,18 @@
 """
 SiteMind Services
-Core AI and communication services
+Core AI and business logic services
 
-Simplified stack for solo developer:
-- Gemini 2.5 Pro (AI)
+TECH STACK:
+- Gemini 3.0 Pro (State-of-the-art AI)
+- Supermemory.ai (Unlimited project context)
 - Twilio (WhatsApp)
 - Supabase (Database + Storage)
+
+BUSINESS SERVICES:
 - ROI Tracking (Proves value to builders)
 - Automated Reports (Weekly/Monthly)
+- Pricing (Active sites + Archive upsell)
+- Project Lifecycle (Onboarding → Archive)
 """
 
 from services.gemini_service import GeminiService
@@ -18,6 +23,7 @@ from services.roi_service import ROIService
 from services.report_service import ReportService
 from services.subscription_service import SubscriptionService
 from services.pricing_service import PricingService
+from services.project_lifecycle import ProjectLifecycleService
 
 __all__ = [
     "GeminiService",
@@ -28,5 +34,5 @@ __all__ = [
     "ReportService",
     "SubscriptionService",
     "PricingService",
+    "ProjectLifecycleService",
 ]
-
