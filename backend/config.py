@@ -28,10 +28,15 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/sitemind"
     database_sync_url: str = "postgresql://postgres:password@localhost:5432/sitemind"
     
-    # Google Gemini - Using the BEST models at $500/site pricing
+    # Google Gemini 3.0 Pro - State of the art reasoning
+    # https://ai.google.dev/gemini-api/docs/gemini-3
     google_api_key: str = ""
-    gemini_model: str = "gemini-2.5-pro"  # Best model - "thinking" capabilities
-    gemini_pro_model: str = "gemini-2.5-pro"  # Same - always use the best
+    gemini_model: str = "gemini-3-pro-preview"  # Gemini 3.0 - best reasoning
+    gemini_pro_model: str = "gemini-3-pro-preview"  # Same - always use the best
+    
+    # Gemini 3.0 specific settings
+    gemini_thinking_level: str = "high"  # low, medium, high - controls reasoning depth
+    gemini_media_resolution: str = "high"  # low, medium, high, ultra_high for blueprints
     
     # Supermemory (optional - falls back to in-memory)
     supermemory_api_key: str = ""
@@ -49,8 +54,8 @@ class Settings(BaseSettings):
     # Sentry
     sentry_dsn: Optional[str] = None
     
-    # Rate Limiting
-    max_queries_per_user_per_day: int = 50
+    # Rate Limiting - UNLIMITED at $500/site but track for analytics
+    max_queries_per_user_per_day: int = 999999  # Effectively unlimited
     
     @property
     def is_production(self) -> bool:

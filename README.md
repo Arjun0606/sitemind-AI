@@ -13,7 +13,7 @@ SiteMind is an AI-powered assistant for construction site engineers in India. It
 
 - **📱 WhatsApp Interface** - Site engineers query via WhatsApp while on scaffolding
 - **🖥️ Web Dashboard** - Management monitors ROI, analytics, and audit trails
-- **🤖 Gemini 2.5 Pro** - Best-in-class AI for blueprint analysis
+- **🤖 Gemini 3.0 Pro** - State-of-the-art AI with dynamic reasoning ([docs](https://ai.google.dev/gemini-api/docs/gemini-3))
 
 ### Key Features
 
@@ -64,7 +64,7 @@ SiteMind is an AI-powered assistant for construction site engineers in India. It
 │   ▼               ▼         ▼         ▼               ▼          │
 │ ┌─────┐     ┌──────────┐ ┌──────┐ ┌────────┐   ┌──────────┐      │
 │ │Gemini│     │Supermemory│ │Supabase│ │ ROI   │   │ Reports │     │
-│ │2.5 Pro│    │(Memory)  │ │(DB/Files)│ │Service│   │ Service │    │
+│ │3.0 Pro│    │(Memory)  │ │(DB/Files)│ │Service│   │ Service │    │
 │ └─────┘     └──────────┘ └──────┘ └────────┘   └──────────┘      │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
