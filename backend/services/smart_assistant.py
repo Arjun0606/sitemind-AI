@@ -12,17 +12,17 @@ FEATURES:
 7. Professional response formatting
 """
 
-import re
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
+import re
 
 
 class QueryUrgency(str, Enum):
-    CRITICAL = "critical"      # Safety, structural, active pour
-    HIGH = "high"              # Needs answer within minutes
-    NORMAL = "normal"          # Regular query
-    LOW = "low"                # Can wait
+    CRITICAL = "critical"
+    HIGH = "high"
+    NORMAL = "normal"
+    LOW = "low"
 
 
 class QueryCategory(str, Enum):
@@ -31,414 +31,255 @@ class QueryCategory(str, Enum):
     MEP = "mep"
     MATERIAL = "material"
     SAFETY = "safety"
-    SCHEDULE = "schedule"
-    COST = "cost"
     GENERAL = "general"
-    OUT_OF_SCOPE = "out_of_scope"
 
 
-# =============================================================================
-# LANGUAGE HANDLING - Hindi/English/Regional Code Switching
-# =============================================================================
-
-# Common Hindi construction terms → English
-HINDI_TO_ENGLISH = {
-    # Structural
-    "khamba": "column",
-    "pillar": "column", 
-    "sthambh": "column",
-    "beam": "beam",
-    "beem": "beam",
-    "girder": "beam",
-    "slab": "slab",
-    "chhat": "slab",
-    "ceiling": "slab",
-    "neev": "foundation",
-    "buniyad": "foundation",
-    "foundation": "foundation",
-    "deewar": "wall",
-    "wall": "wall",
-    "seedi": "staircase",
-    "stairs": "staircase",
-    
-    # Materials
-    "sariya": "rebar",
-    "rod": "rebar",
-    "rebar": "rebar",
-    "steel": "steel",
-    "loha": "steel",
-    "cement": "cement",
-    "concrete": "concrete",
-    "eet": "brick",
-    "brick": "brick",
-    
-    # Actions
-    "dalna": "pour",
-    "pour": "pour",
-    "casting": "pour",
-    "dhalna": "pour",
-    "check": "verify",
-    "dekho": "verify",
-    "batao": "tell",
-    "bolo": "tell",
-    "kya": "what",
-    "kahan": "where",
-    "kitna": "how much",
-    "kaisa": "how",
-    "kab": "when",
-    
-    # Measurements
-    "lambai": "length",
-    "chaudai": "width",
-    "unchai": "height",
-    "gadhai": "depth",
-    "mota": "thick",
-    "patla": "thin",
-    
-    # Common phrases
-    "sahi hai": "is correct",
-    "galat hai": "is wrong",
-    "theek hai": "okay",
-    "samajh nahi aaya": "didn't understand",
-    "dobara batao": "tell again",
-    "jaldi": "urgent",
-    "abhi": "now",
-    "turant": "immediately",
-}
-
-# Common typos → corrections
-TYPO_CORRECTIONS = {
-    "beem": "beam",
-    "bem": "beam",
-    "colum": "column",
-    "coloumn": "column",
-    "columm": "column",
-    "slb": "slab",
-    "slaab": "slab",
-    "rber": "rebar",
-    "rebr": "rebar",
-    "founation": "foundation",
-    "foundatin": "foundation",
-    "spacin": "spacing",
-    "spacng": "spacing",
-    "dimeter": "diameter",
-    "diamter": "diameter",
-    "reinfrcement": "reinforcement",
-    "reinforcment": "reinforcement",
-    "drwing": "drawing",
-    "drawng": "drawing",
-    "flor": "floor",
-    "florr": "floor",
-    "grd": "grid",
-    "gridd": "grid",
-}
-
-# Urgency keywords
-URGENCY_CRITICAL = [
-    "safety", "emergency", "danger", "collapse", "crack", "urgent", 
-    "khatarnak", "danger", "immediately", "abhi", "turant", "jaldi",
-    "active pour", "casting chal raha", "pouring now", "wet concrete"
-]
-
-URGENCY_HIGH = [
-    "asap", "quickly", "fast", "jaldi", "fatafat",
-    "waiting", "ruk gaya", "work stopped", "kaam ruka"
-]
-
-
-class SmartAssistant:
+class SmartAssistantService:
     """
-    Handles all the edge cases to make SiteMind addictive
+    Advanced query processing for construction queries
     """
     
     def __init__(self):
-        # Conversation context (per user)
-        self._context: Dict[str, Dict] = {}
+        # Context memory for follow-up questions
+        self._context: Dict[str, Dict] = {}  # phone -> {last_query, last_response, timestamp}
+        self._context_timeout = timedelta(minutes=10)
         
-        # User stats (for gamification)
+        # User stats
         self._user_stats: Dict[str, Dict] = {}
         
-        # Daily summaries
-        self._daily_queries: Dict[str, List] = {}
-    
-    # =========================================================================
-    # LANGUAGE PROCESSING
-    # =========================================================================
-    
-    def normalize_query(self, query: str) -> Tuple[str, Dict[str, Any]]:
-        """
-        Normalize query - handle Hindi, typos, informal language
+        # Common Hindi-English mappings
+        self.term_mappings = {
+            # Structural elements
+            "khamba": "column",
+            "pillar": "column",
+            "beem": "beam",
+            "chhat": "slab",
+            "neev": "foundation",
+            "buniyad": "foundation",
+            "deewar": "wall",
+            "seedi": "staircase",
+            
+            # Materials
+            "sariya": "rebar",
+            "rod": "rebar",
+            "cement": "cement",
+            "bajri": "aggregate",
+            "reta": "sand",
+            "eent": "brick",
+            
+            # Typos
+            "colum": "column",
+            "colmn": "column",
+            "beem": "beam",
+            "fondation": "foundation",
+            "stiars": "stairs",
+            "staircase": "staircase",
+        }
         
-        Returns: (normalized_query, metadata)
-        """
-        original = query
-        normalized = query.lower().strip()
-        
-        # Track what we changed
-        changes = []
-        
-        # Fix typos
-        for typo, correct in TYPO_CORRECTIONS.items():
-            if typo in normalized:
-                normalized = normalized.replace(typo, correct)
-                changes.append(f"typo:{typo}→{correct}")
-        
-        # Translate Hindi terms (keep both for context)
-        hindi_terms_found = []
-        for hindi, english in HINDI_TO_ENGLISH.items():
-            if hindi in normalized and hindi != english:
-                hindi_terms_found.append(f"{hindi}={english}")
-        
-        # Detect urgency
-        urgency = self._detect_urgency(normalized)
-        
-        # Detect category
-        category = self._detect_category(normalized)
-        
-        # Check for ambiguity
-        ambiguities = self._detect_ambiguity(normalized)
-        
-        return normalized, {
-            "original": original,
-            "changes": changes,
-            "hindi_terms": hindi_terms_found,
-            "urgency": urgency,
-            "category": category,
-            "ambiguities": ambiguities,
-            "needs_clarification": len(ambiguities) > 0,
+        # Urgency keywords
+        self.urgency_keywords = {
+            "critical": ["urgent", "emergency", "immediately", "asap", "jaldi", "abhi", "turant", "critical"],
+            "high": ["today", "now", "quick", "fast", "jald"],
+            "normal": [],
+            "low": ["when you can", "no rush", "later"],
         }
     
-    def _detect_urgency(self, query: str) -> QueryUrgency:
-        """Detect how urgent the query is"""
-        query_lower = query.lower()
-        
-        if any(kw in query_lower for kw in URGENCY_CRITICAL):
-            return QueryUrgency.CRITICAL
-        if any(kw in query_lower for kw in URGENCY_HIGH):
-            return QueryUrgency.HIGH
-        
-        return QueryUrgency.NORMAL
+    # =========================================================================
+    # QUERY PREPROCESSING
+    # =========================================================================
     
-    def _detect_category(self, query: str) -> QueryCategory:
-        """Categorize the query"""
-        query_lower = query.lower()
+    def preprocess_query(self, query: str) -> Dict[str, Any]:
+        """
+        Preprocess query for better understanding
         
-        structural_kw = ["beam", "column", "slab", "foundation", "rebar", "reinforcement", "structural"]
-        architectural_kw = ["floor plan", "layout", "elevation", "section", "architectural", "room"]
-        mep_kw = ["electrical", "plumbing", "hvac", "duct", "pipe", "wire", "mep", "ac"]
-        material_kw = ["cement", "concrete", "steel", "brick", "sand", "aggregate", "material"]
-        safety_kw = ["safety", "danger", "ppe", "harness", "helmet", "fall"]
-        cost_kw = ["cost", "price", "rate", "budget", "kitna paisa", "kharcha"]
+        Returns normalized query and extracted information
+        """
+        original = query
+        processed = query.lower().strip()
         
-        if any(kw in query_lower for kw in safety_kw):
-            return QueryCategory.SAFETY
-        if any(kw in query_lower for kw in structural_kw):
-            return QueryCategory.STRUCTURAL
-        if any(kw in query_lower for kw in mep_kw):
-            return QueryCategory.MEP
-        if any(kw in query_lower for kw in architectural_kw):
-            return QueryCategory.ARCHITECTURAL
-        if any(kw in query_lower for kw in material_kw):
-            return QueryCategory.MATERIAL
-        if any(kw in query_lower for kw in cost_kw):
-            return QueryCategory.COST
+        # Apply term mappings
+        for hindi, english in self.term_mappings.items():
+            processed = processed.replace(hindi, english)
         
-        # Check for out of scope
-        out_of_scope_kw = ["weather", "mausam", "cricket", "movie", "film", "news"]
-        if any(kw in query_lower for kw in out_of_scope_kw):
-            return QueryCategory.OUT_OF_SCOPE
+        # Extract location references
+        location = self._extract_location(query)
         
-        return QueryCategory.GENERAL
+        # Check for ambiguity
+        needs_clarification = self._needs_clarification(processed, location)
+        
+        return {
+            "original_query": original,
+            "normalized_query": processed,
+            "location": location,
+            "needs_clarification": needs_clarification is not None,
+            "clarification_question": needs_clarification,
+        }
     
-    def _detect_ambiguity(self, query: str) -> List[str]:
-        """Detect ambiguous queries that need clarification"""
-        ambiguities = []
+    def _extract_location(self, query: str) -> Dict[str, Any]:
+        """Extract location references from query"""
+        location = {}
         
-        # Check for missing location
-        location_needed = ["beam", "column", "slab", "wall"]
-        has_location = any(loc in query for loc in ["at", "pe", "par", "grid", "floor", "level", "axis"])
+        # Grid reference (e.g., B3, C4)
+        grid_match = re.search(r'\b([A-Z]\d+)\b', query, re.IGNORECASE)
+        if grid_match:
+            location["grid"] = grid_match.group(1).upper()
         
-        if any(item in query for item in location_needed) and not has_location:
-            ambiguities.append("missing_location")
+        # Floor number
+        floor_match = re.search(r'(?:floor|fl|level|lvl|manzil)\s*(\d+)', query, re.IGNORECASE)
+        if floor_match:
+            location["floor"] = int(floor_match.group(1))
         
-        # Check for missing floor
-        if any(f"floor" not in query and f"level" not in query and "manzil" not in query 
-               for _ in [1]) and any(item in query for item in location_needed):
-            if not any(char.isdigit() for char in query):
-                ambiguities.append("missing_floor")
+        # Element type
+        elements = ["beam", "column", "slab", "foundation", "wall", "staircase"]
+        for elem in elements:
+            if elem in query.lower():
+                location["element"] = elem
+                break
         
-        # Generic "size" without specifying what
-        if "size" in query or "dimension" in query:
-            specific_items = ["beam", "column", "slab", "footing", "pile"]
-            if not any(item in query for item in specific_items):
-                ambiguities.append("missing_element_type")
+        return location
+    
+    def _needs_clarification(self, query: str, location: Dict) -> Optional[str]:
+        """Check if query needs clarification"""
         
-        return ambiguities
+        # Has element but no location
+        if location.get("element") and not location.get("grid") and not location.get("floor"):
+            element = location["element"]
+            return f"Which {element} are you asking about? Please specify the grid reference (e.g., B3) or floor number."
+        
+        # Generic question without specifics
+        generic_patterns = [
+            r"^what(\s+is)?(\s+the)?\s*(size|dimension|spec)",
+            r"^(kya|kitna)\s",
+        ]
+        
+        for pattern in generic_patterns:
+            if re.match(pattern, query) and not location:
+                return "Please specify which element you're asking about. For example: 'beam size B3 floor 2' or 'column C4 rebar'"
+        
+        return None
     
     # =========================================================================
     # CONTEXT MANAGEMENT (Follow-up questions)
     # =========================================================================
     
-    def get_context(self, user_phone: str) -> Dict[str, Any]:
-        """Get conversation context for a user"""
-        if user_phone not in self._context:
-            self._context[user_phone] = {
-                "last_query": None,
-                "last_topic": None,
-                "last_location": None,
-                "last_element": None,
-                "last_response": None,
-                "timestamp": None,
-                "query_count_today": 0,
-            }
-        return self._context[user_phone]
+    def update_context(self, phone: str, query: str, response: str):
+        """Store context for follow-up questions"""
+        self._context[phone] = {
+            "last_query": query,
+            "last_response": response,
+            "last_location": self._extract_location(query),
+            "timestamp": datetime.utcnow(),
+        }
     
-    def update_context(
-        self, 
-        user_phone: str, 
-        query: str, 
-        response: str,
-        topic: Optional[str] = None,
-        location: Optional[str] = None,
-        element: Optional[str] = None,
-    ):
-        """Update conversation context after a query"""
-        ctx = self.get_context(user_phone)
-        ctx["last_query"] = query
-        ctx["last_response"] = response
-        ctx["last_topic"] = topic or ctx["last_topic"]
-        ctx["last_location"] = location or ctx["last_location"]
-        ctx["last_element"] = element or ctx["last_element"]
-        ctx["timestamp"] = datetime.utcnow().isoformat()
-        ctx["query_count_today"] = ctx.get("query_count_today", 0) + 1
+    def get_context(self, phone: str) -> Optional[Dict]:
+        """Get context if still valid"""
+        ctx = self._context.get(phone)
+        if not ctx:
+            return None
+        
+        # Check if expired
+        if datetime.utcnow() - ctx["timestamp"] > self._context_timeout:
+            del self._context[phone]
+            return None
+        
+        return ctx
     
-    def is_followup_query(self, user_phone: str, query: str) -> Tuple[bool, Optional[str]]:
-        """
-        Check if this is a follow-up to previous query
+    def resolve_follow_up(self, phone: str, query: str) -> str:
+        """Resolve follow-up question with context"""
+        ctx = self.get_context(phone)
+        if not ctx:
+            return query
         
-        Examples:
-        - Previous: "Beam size at B2?"
-        - Follow-up: "And the reinforcement?" → Should understand it's about B2
-        """
-        ctx = self.get_context(user_phone)
-        
-        if not ctx["last_query"]:
-            return False, None
-        
-        # Check if recent (within 10 minutes)
-        if ctx["timestamp"]:
-            last_time = datetime.fromisoformat(ctx["timestamp"])
-            if datetime.utcnow() - last_time > timedelta(minutes=10):
-                return False, None
-        
-        # Follow-up indicators
-        followup_phrases = [
-            "and ", "aur ", "also", "bhi", "what about", "kya", 
-            "same", "wahi", "usme", "iska", "uska",
-            "reinforcement", "spacing", "size", "detail"
+        # Check for follow-up patterns
+        follow_up_patterns = [
+            r"^(and|also)\s+(what about|how about)",
+            r"^what about",
+            r"^how about",
+            r"^(aur|bhi)\s",
+            r"^same (for|at)",
         ]
         
         query_lower = query.lower()
+        is_follow_up = any(re.match(p, query_lower) for p in follow_up_patterns)
         
-        # Short query that references previous context
-        if len(query.split()) <= 5 and any(fp in query_lower for fp in followup_phrases):
-            # Build context string
-            context = f"Following up on: {ctx['last_query']}"
-            if ctx["last_location"]:
-                context += f" at {ctx['last_location']}"
-            if ctx["last_element"]:
-                context += f" ({ctx['last_element']})"
+        if is_follow_up:
+            last_location = ctx.get("last_location", {})
             
-            return True, context
+            # Inject previous location context
+            if last_location.get("grid") and "grid" not in self._extract_location(query):
+                query = f"{query} at {last_location['grid']}"
+            if last_location.get("floor") and "floor" not in query.lower():
+                query = f"{query} floor {last_location['floor']}"
         
-        return False, None
+        return query
     
     # =========================================================================
-    # CLARIFICATION REQUESTS
+    # URGENCY & CATEGORY DETECTION
     # =========================================================================
     
-    def generate_clarification(self, query: str, ambiguities: List[str]) -> str:
-        """Generate a helpful clarification request"""
+    def detect_urgency(self, query: str) -> QueryUrgency:
+        """Detect query urgency level"""
+        query_lower = query.lower()
         
-        clarifications = []
+        for level, keywords in self.urgency_keywords.items():
+            if any(kw in query_lower for kw in keywords):
+                return QueryUrgency(level)
         
-        if "missing_location" in ambiguities:
-            clarifications.append("📍 Which grid/axis? (e.g., 'B2' or 'grid A-C')")
+        return QueryUrgency.NORMAL
+    
+    def categorize_query(self, query: str) -> QueryCategory:
+        """Categorize the query type"""
+        query_lower = query.lower()
         
-        if "missing_floor" in ambiguities:
-            clarifications.append("🏢 Which floor/level? (e.g., '3rd floor' or 'basement')")
+        # Safety related
+        safety_keywords = ["safety", "danger", "hazard", "protective", "ppe", "accident", "injury"]
+        if any(kw in query_lower for kw in safety_keywords):
+            return QueryCategory.SAFETY
         
-        if "missing_element_type" in ambiguities:
-            clarifications.append("🔧 Size of what? (beam, column, slab, footing?)")
+        # Structural
+        structural_keywords = ["beam", "column", "slab", "foundation", "rebar", "concrete", "structural"]
+        if any(kw in query_lower for kw in structural_keywords):
+            return QueryCategory.STRUCTURAL
         
-        if not clarifications:
-            return ""
+        # MEP
+        mep_keywords = ["electrical", "plumbing", "hvac", "pipe", "wire", "duct", "ac", "drainage"]
+        if any(kw in query_lower for kw in mep_keywords):
+            return QueryCategory.MEP
         
-        response = "I want to give you the exact answer. Can you clarify:\n\n"
-        response += "\n".join(clarifications)
-        response += "\n\nExample: 'Beam size at B2, 3rd floor'"
+        # Material
+        material_keywords = ["cement", "steel", "sand", "aggregate", "stock", "material", "quantity"]
+        if any(kw in query_lower for kw in material_keywords):
+            return QueryCategory.MATERIAL
         
-        return response
+        # Architectural
+        arch_keywords = ["door", "window", "tile", "paint", "finishing", "facade"]
+        if any(kw in query_lower for kw in arch_keywords):
+            return QueryCategory.ARCHITECTURAL
+        
+        return QueryCategory.GENERAL
     
     # =========================================================================
     # CONFLICT DETECTION
     # =========================================================================
     
-    def check_for_conflicts(
-        self, 
-        query: str, 
-        memory_results: List[Dict],
-        blueprint_info: Optional[str] = None
-    ) -> Optional[str]:
-        """
-        Check if there are conflicting pieces of information
+    def detect_conflicts(self, memory_results: List[Dict]) -> List[str]:
+        """Detect conflicts in memory results"""
+        conflicts = []
         
-        Example: Memory says "beam changed to 600mm" but blueprint shows 450mm
-        """
-        # This would be enhanced with actual comparison logic
-        # For now, flag if there are multiple change orders for same element
+        # Check for multiple change orders on same element
+        change_orders = [
+            m for m in memory_results 
+            if m.get("content_type") == "change_order" or 
+               m.get("metadata", {}).get("type") == "change_order"
+        ]
         
-        change_orders = [m for m in memory_results if m.get("metadata", {}).get("type") == "change_order"]
+        if len(change_orders) >= 2:
+            conflicts.append(
+                f"Multiple change orders found ({len(change_orders)}). "
+                "Please verify the current specification."
+            )
         
-        if len(change_orders) > 1:
-            # Multiple change orders - check if they're for same element
-            # Simplified: just warn
-            return "⚠️ Note: There have been multiple changes to this element. Showing the latest."
-        
-        return None
-    
-    # =========================================================================
-    # PROACTIVE FEATURES
-    # =========================================================================
-    
-    def get_proactive_alerts(self, project_id: str, user_phone: str) -> List[str]:
-        """
-        Generate proactive alerts for the user
-        
-        Examples:
-        - "Drawing SK-003 was updated 2 hours ago"
-        - "3 engineers asked about Beam B2 today - there might be confusion"
-        - "You haven't confirmed the stirrup fix from yesterday"
-        """
-        alerts = []
-        
-        # Would check:
-        # - Recent drawing uploads
-        # - Unresolved issues
-        # - Trending questions (many people asking same thing)
-        # - Follow-up reminders
-        
-        return alerts
-    
-    def generate_daily_summary(self, project_id: str, user_phone: str) -> str:
-        """
-        Generate daily summary for a user
-        
-        "Today you asked 23 questions and saved ~4 hours.
-        SiteMind caught 2 potential issues before they became problems."
-        """
-        # Would pull from actual stats
-        return ""
+        return conflicts
     
     # =========================================================================
     # USER METRICS (Professional, no gamification)
@@ -461,6 +302,37 @@ class SmartAssistant:
         
         if not stats["first_query_date"]:
             stats["first_query_date"] = datetime.utcnow().isoformat()
+    
+    # =========================================================================
+    # RESPONSE ENHANCEMENT
+    # =========================================================================
+    
+    def enhance_response(
+        self, 
+        response: str, 
+        urgency: QueryUrgency,
+        category: QueryCategory,
+        user_stats: Dict,
+    ) -> str:
+        """
+        Enhance response based on context
+        
+        - Add warnings for safety queries
+        - Adjust formatting based on urgency
+        - Keep professional tone
+        """
+        enhanced = response
+        
+        # Safety queries get clear warning
+        if category == QueryCategory.SAFETY:
+            enhanced = "**⚠️ SAFETY-RELATED QUERY**\n\n" + enhanced
+            enhanced += "\n\n_Note: For safety-critical work, always verify with site supervisor and follow established protocols._"
+        
+        # Urgent queries get priority indicator
+        if urgency == QueryUrgency.CRITICAL:
+            enhanced = "**PRIORITY RESPONSE**\n\n" + enhanced
+        
+        return enhanced
     
     # =========================================================================
     # OUT OF SCOPE HANDLING
@@ -497,39 +369,7 @@ class SmartAssistant:
         suggestions = []
         # Would analyze patterns and suggest relevant actions
         return suggestions
-    
-    # =========================================================================
-    # RESPONSE ENHANCEMENT
-    # =========================================================================
-    
-    def enhance_response(
-        self, 
-        response: str, 
-        urgency: QueryUrgency,
-        category: QueryCategory,
-        user_stats: Dict,
-    ) -> str:
-        """
-        Enhance response based on context
-        
-        - Add warnings for safety queries
-        - Adjust formatting based on urgency
-        - Keep professional tone
-        """
-        enhanced = response
-        
-        # Safety queries get clear warning
-        if category == QueryCategory.SAFETY:
-            enhanced = "**⚠️ SAFETY-RELATED QUERY**\n\n" + enhanced
-            enhanced += "\n\n_Note: For safety-critical work, always verify with site supervisor and follow established protocols._"
-        
-        # Urgent queries get priority indicator
-        if urgency == QueryUrgency.CRITICAL:
-            enhanced = "**PRIORITY RESPONSE**\n\n" + enhanced
-        
-        return enhanced
 
 
 # Singleton instance
-smart_assistant = SmartAssistant()
-
+smart_assistant = SmartAssistantService()

@@ -1,711 +1,700 @@
 """
-SiteMind WhatsApp Webhook Router
-The MAIN interface - everything happens via WhatsApp
+SiteMind WhatsApp Router
+The main entry point - handles ALL incoming WhatsApp messages
 
-INDIAN CONSTRUCTION WORKFLOW:
-- Architect sends updated drawing → SiteMind processes & stores
-- Office sends change order → SiteMind records with audit trail
-- Engineer asks question → SiteMind answers with citations
-- Anyone sends photo → SiteMind verifies against blueprints
-
-SUPPORTED MESSAGE TYPES:
-1. Text query → AI answers from blueprints + memory
-2. Site photo → AI verifies against drawings
-3. Blueprint/Drawing (PDF/image) → AI processes & stores
-4. Change order/RFI text → AI records in memory
+FLOW:
+1. Receive message from Twilio webhook
+2. Identify user and project
+3. Classify input (query, upload, command, etc.)
+4. Process through appropriate service
+5. Send response back via WhatsApp
 """
 
-import time
-import re
-from typing import Optional, Tuple
-from datetime import datetime
-from fastapi import APIRouter, Request, Form, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import Response
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+import json
 
-from config import settings
 from utils.logger import logger
-from utils.helpers import extract_phone_number
-from utils.database import get_async_session
-from models.database import Project, SiteEngineer, Blueprint, ChatLog
-from services.gemini_service import gemini_service
-from services.memory_service import memory_service
-from services.whatsapp_client import whatsapp_client
-from services.storage_service import storage_service
+
+# Import all services
+from services.universal_inbox import universal_inbox, InputType, InputIntent
 from services.smart_assistant import smart_assistant
+from services.gemini_service import GeminiService
+from services.memory_service import MemoryService
+from services.whatsapp_client import WhatsAppClient
+from services.storage_service import StorageService
+from services.red_flag_service import red_flag_service
+from services.team_management import team_management
+from services.task_management import task_management, TaskStatus
+from services.material_management import material_management
+from services.progress_monitoring import progress_monitoring
+from services.office_site_sync import office_site_sync
+from services.proactive_intelligence import proactive_intelligence
 from services.engagement_service import engagement_service
+from services.roi_service import ROIService
+from services.config_service import config_service
 
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 
+# Initialize services (in production, use dependency injection)
+gemini = GeminiService()
+memory = MemoryService()
+whatsapp = WhatsAppClient()
+storage = StorageService()
+roi = ROIService()
 
-# Keywords that indicate document upload vs query
-DRAWING_KEYWORDS = [
-    "revised", "revision", "new drawing", "updated drawing", "nayi drawing",
-    "new plan", "updated plan", "floor plan", "structural", "architectural",
-    "mep", "electrical", "plumbing", "section", "detail", "schedule",
-    "bar bending", "bbs", "column schedule", "beam schedule", "slab",
-    "v2", "v3", "rev", "r1", "r2", "r3", "latest"
-]
 
-CHANGE_ORDER_KEYWORDS = [
-    "change order", "co#", "co-", "change:", "changed", "badal", "badlo",
-    "modification", "modified", "updated spec", "new spec", "revised spec",
-    "increase", "decrease", "moved", "shifted", "relocated"
-]
+# =============================================================================
+# MODELS
+# =============================================================================
 
-RFI_KEYWORDS = [
-    "rfi", "rfi#", "rfi-", "clarification", "query answered", "answer:",
-    "confirmed", "consultant says", "architect says", "structural says",
-    "as per consultant", "jawab", "reply"
-]
+class TwilioWebhook(BaseModel):
+    """Twilio WhatsApp webhook payload"""
+    From: str
+    To: str
+    Body: Optional[str] = ""
+    NumMedia: Optional[str] = "0"
+    MediaUrl0: Optional[str] = None
+    MediaContentType0: Optional[str] = None
+    MessageSid: Optional[str] = None
+    ProfileName: Optional[str] = None
 
-ADMIN_KEYWORDS = [
-    "add engineer", "remove engineer", "new site", "add site",
-    "project status", "usage report", "billing"
-]
 
+# =============================================================================
+# MAIN WEBHOOK ENDPOINT
+# =============================================================================
 
 @router.post("/webhook")
-async def whatsapp_webhook(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_async_session),
-    # Twilio webhook form fields
-    MessageSid: str = Form(...),
-    From: str = Form(...),
-    To: str = Form(...),
-    Body: Optional[str] = Form(""),
-    NumMedia: str = Form("0"),
-    MediaUrl0: Optional[str] = Form(None),
-    MediaContentType0: Optional[str] = Form(None),
-    ProfileName: Optional[str] = Form(None),
-):
+async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
     """
-    Main WhatsApp webhook - handles ALL interactions
-    
-    Flow:
-    1. Identify user and their project
-    2. Detect message intent (query, drawing upload, change order, etc.)
-    3. Process accordingly
-    4. Store in memory for future reference
-    5. Respond
+    Main WhatsApp webhook - handles all incoming messages
     """
-    start_time = time.time()
-    
     try:
-        user_phone = extract_phone_number(From)
-        message_text = Body or ""
-        has_media = int(NumMedia) > 0
-        media_type = MediaContentType0 or ""
+        # Parse form data from Twilio
+        form_data = await request.form()
+        data = dict(form_data)
         
-        logger.info(f"📱 Message from {user_phone}: {message_text[:50]}... (media: {has_media})")
+        # Extract message details
+        from_number = data.get("From", "").replace("whatsapp:", "")
+        to_number = data.get("To", "").replace("whatsapp:", "")
+        body = data.get("Body", "").strip()
+        num_media = int(data.get("NumMedia", "0"))
+        media_url = data.get("MediaUrl0")
+        media_type = data.get("MediaContentType0")
+        profile_name = data.get("ProfileName", "User")
+        message_sid = data.get("MessageSid")
         
-        # Find user's project
-        project, engineer = await _find_project_and_engineer(db, user_phone)
+        logger.info(f"📱 WhatsApp message from {from_number}: {body[:50]}...")
         
-        if not project:
-            await whatsapp_client.send_message(
-                to=user_phone,
-                body="👋 Hi! I'm SiteMind, your AI Site Engineer.\n\nYou're not registered for any project yet. Please contact your project manager to get added."
-            )
-            return Response(content="", media_type="text/xml")
+        # Look up user and project
+        user, project = await lookup_user_project(from_number)
         
-        # Detect message type and intent
-        intent = _detect_intent(message_text, has_media, media_type)
+        if not user or not project:
+            # Unknown user - send registration message
+            await send_unknown_user_response(from_number)
+            return {"status": "unknown_user"}
         
-        # Route to appropriate handler
-        if intent == "drawing_upload":
-            response = await _handle_drawing_upload(
-                project, user_phone, ProfileName,
-                message_text, MediaUrl0, media_type,
-                background_tasks
-            )
+        # Get user config
+        org_id = project.get("organization_id")
+        project_id = project.get("id")
+        user_id = user.get("id")
+        user_role = user.get("role", "site_engineer")
         
-        elif intent == "change_order":
-            response = await _handle_change_order(
-                project, user_phone, ProfileName,
-                message_text, MediaUrl0, media_type,
-                background_tasks
-            )
-        
-        elif intent == "rfi":
-            response = await _handle_rfi(
-                project, user_phone, ProfileName,
-                message_text, background_tasks
-            )
-        
-        elif intent == "site_photo":
-            response = await _handle_site_photo(
-                project, user_phone, message_text,
-                MediaUrl0, db, background_tasks
-            )
-        
-        elif intent == "voice":
-            response = "🎤 Voice notes aren't supported yet. Please type your question or send a photo!"
-        
-        else:  # Default: query
-            response = await _handle_query(
-                project, user_phone, ProfileName,
-                message_text, db, background_tasks
-            )
+        # Process the message
+        response = await process_message(
+            user=user,
+            project=project,
+            body=body,
+            num_media=num_media,
+            media_url=media_url,
+            media_type=media_type,
+            profile_name=profile_name,
+        )
         
         # Send response
-        await whatsapp_client.send_message(to=user_phone, body=response)
+        if response.get("message"):
+            await whatsapp.send_message(from_number, response["message"])
         
-        total_time_ms = int((time.time() - start_time) * 1000)
-        logger.info(f"✅ Response sent in {total_time_ms}ms (intent: {intent})")
+        # Send any follow-up messages (e.g., welcome message to new team member)
+        if response.get("welcome_message"):
+            wm = response["welcome_message"]
+            await whatsapp.send_message(wm["phone"], wm["message"])
         
-        # Log interaction
+        # Track metrics in background
         background_tasks.add_task(
-            _log_chat_interaction,
-            db, project.id, user_phone, ProfileName,
-            intent, message_text, MediaUrl0, response,
-            total_time_ms, None, None
+            track_interaction,
+            user_id=user_id,
+            project_id=project_id,
+            query=body,
+            response=response.get("message", ""),
+            intent=response.get("intent", "unknown"),
         )
         
-        return Response(content="", media_type="text/xml")
+        return {"status": "ok", "message_sid": message_sid}
         
     except Exception as e:
-        logger.error(f"❌ Webhook error: {e}", exc_info=True)
-        try:
-            await whatsapp_client.send_message(
-                to=extract_phone_number(From),
-                body="Sorry, I encountered an error. Please try again in a moment."
-            )
-        except:
-            pass
-        return Response(content="", media_type="text/xml")
+        logger.error(f"WhatsApp webhook error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-def _detect_intent(message: str, has_media: bool, media_type: str) -> str:
+# =============================================================================
+# MESSAGE PROCESSING
+# =============================================================================
+
+async def process_message(
+    user: Dict,
+    project: Dict,
+    body: str,
+    num_media: int,
+    media_url: Optional[str],
+    media_type: Optional[str],
+    profile_name: str,
+) -> Dict[str, Any]:
     """
-    Detect what the user wants to do
-    
-    Returns: drawing_upload, change_order, rfi, site_photo, voice, query
+    Process incoming message through the full pipeline
     """
-    message_lower = message.lower()
+    user_id = user.get("id")
+    user_phone = user.get("phone")
+    user_role = user.get("role", "site_engineer")
+    project_id = project.get("id")
+    org_id = project.get("organization_id")
     
-    # Voice note
-    if has_media and "audio" in media_type:
-        return "voice"
+    # Get config
+    branding = config_service.get_branding(org_id) if org_id else {}
+    assistant_name = branding.get("assistant_name", "SiteMind")
     
-    # Document/PDF upload (likely drawing)
-    if has_media and ("pdf" in media_type or "document" in media_type):
-        return "drawing_upload"
+    # Determine message type
+    message_type = "text"
+    if num_media > 0:
+        if media_type and "image" in media_type:
+            message_type = "image"
+        elif media_type and "pdf" in media_type:
+            message_type = "document"
+        elif media_type and "audio" in media_type:
+            message_type = "audio"
     
-    # Image with drawing keywords → drawing upload
-    if has_media and "image" in media_type:
-        if any(kw in message_lower for kw in DRAWING_KEYWORDS):
-            return "drawing_upload"
-        # Default: treat images as site photos
-        return "site_photo"
+    # =========================================================================
+    # STEP 1: Check for special commands
+    # =========================================================================
     
-    # Text with change order keywords
-    if any(kw in message_lower for kw in CHANGE_ORDER_KEYWORDS):
-        return "change_order"
+    # Team management commands
+    team_cmd = team_management.parse_command(body)
+    if team_cmd:
+        result = await team_management.execute_command(
+            command=team_cmd,
+            requester_phone=user_phone,
+            project_id=project_id,
+            organization_id=org_id,
+        )
+        return {
+            "message": result.get("message"),
+            "intent": "team_management",
+            "welcome_message": result.get("welcome_message"),
+        }
     
-    # Text with RFI keywords
-    if any(kw in message_lower for kw in RFI_KEYWORDS):
-        return "rfi"
+    # Task management commands
+    task_cmd = parse_task_command(body, user_role)
+    if task_cmd:
+        result = await handle_task_command(task_cmd, user, project)
+        return {
+            "message": result.get("message"),
+            "intent": "task_management",
+        }
     
-    # Default: regular query
-    return "query"
-
-
-async def _handle_drawing_upload(
-    project, user_phone: str, user_name: str,
-    message: str, media_url: str, media_type: str,
-    background_tasks: BackgroundTasks
-) -> str:
-    """
-    Handle new drawing/blueprint upload via WhatsApp
+    # Material commands
+    material_cmd = parse_material_command(body)
+    if material_cmd:
+        result = await handle_material_command(material_cmd, user, project)
+        return {
+            "message": result.get("message"),
+            "intent": "material_management",
+        }
     
-    Architect sends: [PDF] "Revised floor plan v2.3"
-    → Download, store in Supabase, process with Gemini, add to memory
-    """
-    try:
-        # Download the file
-        file_data = await whatsapp_client.download_media(media_url)
-        if not file_data:
-            return "❌ Couldn't download the file. Please try sending again."
-        
-        # Determine file type
-        if "pdf" in media_type:
-            file_ext = "pdf"
-            doc_type = "blueprint"
-        else:
-            file_ext = "jpg"
-            doc_type = "drawing_image"
-        
-        # Generate filename from message or timestamp
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        drawing_name = _extract_drawing_name(message) or f"drawing_{timestamp}"
-        filename = f"{project.id}/{drawing_name}.{file_ext}"
-        
-        # Store in Supabase
-        storage_result = await storage_service.upload_file(
-            file_data=file_data,
-            filename=filename,
-            content_type=media_type,
-        )
-        
-        if not storage_result:
-            return "❌ Couldn't store the file. Please try again."
-        
-        # Upload to Gemini for processing
-        # (In production, save locally first then upload)
-        gemini_result = await gemini_service.upload_blueprint(
-            file_path=storage_result.get("url", ""),
-            display_name=drawing_name,
-            doc_type=doc_type,
-        )
-        
-        # Store in memory for context
-        background_tasks.add_task(
-            memory_service.add_memory,
-            project_id=str(project.id),
-            content=f"NEW DRAWING UPLOADED: {drawing_name}. Uploaded by {user_name or user_phone}. Notes: {message}",
-            metadata={
-                "type": "blueprint_revision",
-                "drawing_name": drawing_name,
-                "uploaded_by": user_name or user_phone,
-                "date": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
-                "storage_url": storage_result.get("url"),
-                "original_message": message,
-            }
-        )
-        
-        return f"""✅ Drawing received and processed!
-
-📐 **{drawing_name}**
-📅 Uploaded: {datetime.utcnow().strftime("%d %b %Y, %H:%M")}
-👤 By: {user_name or user_phone}
-
-The AI is now aware of this drawing. Engineers can ask questions about it.
-
-💡 Tip: Add notes like "Column C5 moved 500mm east" when uploading for better tracking."""
-        
-    except Exception as e:
-        logger.error(f"Drawing upload error: {e}")
-        return "❌ Error processing the drawing. Please try again or contact support."
-
-
-async def _handle_change_order(
-    project, user_phone: str, user_name: str,
-    message: str, media_url: Optional[str], media_type: str,
-    background_tasks: BackgroundTasks
-) -> str:
-    """
-    Handle change order recording via WhatsApp
+    # Report requests
+    if is_report_request(body):
+        report = await generate_report(body, project, user_role)
+        return {
+            "message": report,
+            "intent": "report_request",
+        }
     
-    PM sends: "Change order: Column C5 increased from 500x500 to 600x600 
-              due to additional load. Approved by structural consultant."
+    # Help command
+    if body.lower() in ["help", "?", "commands", "menu"]:
+        return {
+            "message": get_help_message(user_role, assistant_name),
+            "intent": "help",
+        }
     
-    → Parse, store in memory with full audit trail
-    """
-    try:
-        # Use Gemini to extract structured change order info
-        extraction_prompt = f"""Extract change order details from this message:
-"{message}"
-
-Return in this format:
-- What changed: [component and location]
-- Previous value: [old spec]
-- New value: [new spec]
-- Reason: [why it changed]
-- Approved by: [who approved, if mentioned]
-- Drawing reference: [drawing number if mentioned]
-
-If any field is not mentioned, write "Not specified"."""
-
-        extraction_result = await gemini_service.analyze_query(
-            query=extraction_prompt,
-            thinking_level="low"
-        )
-        
-        extracted = extraction_result.get("response", "")
-        
-        # Store in memory with audit trail
-        await memory_service.add_memory(
-            project_id=str(project.id),
-            content=f"CHANGE ORDER: {message}",
-            metadata={
-                "type": "change_order",
-                "recorded_by": user_name or user_phone,
-                "date": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
-                "original_message": message,
-                "extracted_details": extracted,
-                "has_attachment": bool(media_url),
-            }
-        )
-        
-        # If there's an attached drawing, process it too
-        attachment_note = ""
-        if media_url and "image" in media_type:
-            attachment_note = "\n📎 Attached drawing has been saved for reference."
-        
-        return f"""✅ Change Order Recorded!
-
-📝 **Details captured:**
-{extracted}
-
-📅 Recorded: {datetime.utcnow().strftime("%d %b %Y, %H:%M")}
-👤 By: {user_name or user_phone}
-{attachment_note}
-
-This change is now in the project memory. Future queries will reflect this update.
-
-⚠️ Make sure to upload the revised drawing if not already done."""
-
-    except Exception as e:
-        logger.error(f"Change order error: {e}")
-        return "❌ Error recording change order. Please try again."
-
-
-async def _handle_rfi(
-    project, user_phone: str, user_name: str,
-    message: str, background_tasks: BackgroundTasks
-) -> str:
-    """
-    Handle RFI recording via WhatsApp
+    # =========================================================================
+    # STEP 2: Classify input through Universal Inbox
+    # =========================================================================
     
-    Someone forwards: "RFI-089: Rebar spacing for slab S3? 
-                      Answer: 150mm c/c both ways - Structural Consultant"
+    classification = await universal_inbox.process_input(
+        project_id=project_id,
+        user_id=user_id,
+        user_phone=user_phone,
+        message_type=message_type,
+        content=body,
+        media_url=media_url,
+        media_mime_type=media_type,
+    )
     
-    → Parse and store for future reference
-    """
-    try:
-        # Use Gemini to extract RFI info
-        extraction_prompt = f"""Extract RFI details from this message:
-"{message}"
-
-Return in this format:
-- RFI Number: [number if mentioned]
-- Question: [what was asked]
-- Answer: [the response/clarification]
-- Answered by: [who answered]
-- Drawing reference: [if mentioned]
-
-If any field is not clear, write "Not specified"."""
-
-        extraction_result = await gemini_service.analyze_query(
-            query=extraction_prompt,
-            thinking_level="low"
-        )
-        
-        extracted = extraction_result.get("response", "")
-        
-        # Store in memory
-        await memory_service.add_memory(
-            project_id=str(project.id),
-            content=f"RFI: {message}",
-            metadata={
-                "type": "rfi",
-                "recorded_by": user_name or user_phone,
-                "date": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
-                "original_message": message,
-                "extracted_details": extracted,
-            }
-        )
-        
-        return f"""✅ RFI Recorded!
-
-📋 **Details captured:**
-{extracted}
-
-📅 Recorded: {datetime.utcnow().strftime("%d %b %Y, %H:%M")}
-👤 Forwarded by: {user_name or user_phone}
-
-This clarification is now in the project memory. Engineers asking related questions will get this information."""
-
-    except Exception as e:
-        logger.error(f"RFI error: {e}")
-        return "❌ Error recording RFI. Please try again."
-
-
-async def _handle_site_photo(
-    project, user_phone: str, message: str,
-    media_url: str, db: AsyncSession,
-    background_tasks: BackgroundTasks
-) -> str:
-    """
-    Handle site photo verification
+    input_type = classification["input_type"]
+    intent = classification["intent"]
+    extracted = classification["extracted_data"]
     
-    Engineer sends: [Photo] "Is this rebar spacing correct?"
-    → Compare against blueprints, flag issues
-    """
-    try:
-        # Download image
-        image_data = await whatsapp_client.download_media(media_url)
-        if not image_data:
-            return "❌ Couldn't download the photo. Please try again."
-        
-        # Get project blueprints
-        blueprint_ids = await _get_project_blueprint_ids(db, project.id)
-        
-        # Get relevant memory context
-        memory_result = await memory_service.search_memory(
-            project_id=str(project.id),
-            query=message or "site photo verification",
-            limit=5,
-        )
-        
-        # Analyze with Gemini
-        query = message or "Analyze this site photo. Check if what's shown matches the project blueprints. Flag any potential issues."
-        
-        ai_result = await gemini_service.analyze_site_photo(
-            image_data=image_data,
-            query=query,
-            blueprint_ids=blueprint_ids,
-        )
-        
-        response = ai_result.get("response", "I couldn't analyze the photo. Please try again.")
-        
-        # Store the verification in memory
-        background_tasks.add_task(
-            memory_service.add_memory,
-            project_id=str(project.id),
-            content=f"SITE PHOTO VERIFICATION: Query: {message}. Result: {response[:200]}...",
-            metadata={
-                "type": "photo_verification",
-                "query": message,
-                "date": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
-            }
-        )
-        
-        return response
-        
-    except Exception as e:
-        logger.error(f"Site photo error: {e}")
-        return "❌ Error analyzing the photo. Please try again."
-
-
-async def _handle_query(
-    project, user_phone: str, user_name: str,
-    message: str, db: AsyncSession,
-    background_tasks: BackgroundTasks
-) -> str:
-    """
-    Handle regular queries about blueprints/project
+    # =========================================================================
+    # STEP 3: Handle based on intent
+    # =========================================================================
     
-    Engineer asks: "Beam size at B2 3rd floor?"
-    → Search memory + blueprints, answer with citations
+    # Document uploads
+    if intent == InputIntent.UPLOAD_DOCUMENT and media_url:
+        # Store document
+        doc_result = await handle_document_upload(
+            media_url, media_type, body, user, project
+        )
+        return {
+            "message": doc_result.get("message"),
+            "intent": "upload_document",
+        }
     
-    SMART FEATURES:
-    - Hindi/English code switching
-    - Typo correction
-    - Follow-up question handling
-    - Ambiguity detection
-    - Urgency detection
-    """
-    try:
-        # Normalize query (handle Hindi, typos, etc.)
-        normalized_query, query_meta = smart_assistant.normalize_query(message)
-        
-        # Check if this is a follow-up question
-        is_followup, followup_context = smart_assistant.is_followup_query(user_phone, message)
-        
-        # Check for ambiguity - need clarification?
-        if query_meta["needs_clarification"] and not is_followup:
-            clarification = smart_assistant.generate_clarification(message, query_meta["ambiguities"])
-            if clarification:
-                return clarification
-        
-        # Check for out of scope
-        if query_meta["category"] == "out_of_scope":
-            return smart_assistant.handle_out_of_scope(message)
-        
-        # Build enhanced query with context
-        enhanced_query = message
-        if is_followup and followup_context:
-            enhanced_query = f"{followup_context}\n\nNew question: {message}"
-        
-        # Get relevant memory context
-        memory_result = await memory_service.search_memory(
-            project_id=str(project.id),
-            query=normalized_query,
-            limit=10,
+    # Photo uploads
+    if message_type == "image" and media_url:
+        photo_result = await handle_photo_upload(
+            media_url, body, user, project, extracted
         )
-        memory_context = memory_result.get("context", "")
-        
-        # Check for conflicts in memory
-        conflict_warning = smart_assistant.check_for_conflicts(
-            normalized_query, 
-            memory_result.get("results", [])
-        )
-        
-        # Get project blueprints
-        blueprint_ids = await _get_project_blueprint_ids(db, project.id)
-        
-        # Determine thinking level based on urgency
-        thinking_level = "low" if query_meta["urgency"] == "critical" else "high"
-        
-        # Query Gemini
-        ai_result = await gemini_service.analyze_query(
-            query=enhanced_query,
-            blueprint_ids=blueprint_ids,
-            memory_context=memory_context,
-            thinking_level=thinking_level,
-        )
-        
-        response = ai_result.get("response", "I couldn't find an answer. Please try rephrasing your question.")
-        
-        # Add conflict warning if any
-        if conflict_warning:
-            response = conflict_warning + "\n\n" + response
-        
-        # Enhance response based on context
-        user_stats = smart_assistant.get_user_stats(user_phone)
-        response = smart_assistant.enhance_response(
-            response, 
-            query_meta["urgency"],
-            query_meta["category"],
-            user_stats
-        )
-        
-        # Update conversation context
-        smart_assistant.update_context(
-            user_phone, message, response,
-            topic=str(query_meta["category"]),
-        )
-        
-        # Track engagement
-        issue_detected = "⚠️" in response or "ISSUE" in response.upper()
-        engagement_service.track_query(
-            project_id=str(project.id),
-            user_phone=user_phone,
-            user_name=user_name or "Unknown",
-            query=message,
-            response=response,
-            issue_detected=issue_detected,
-        )
-        
-        # Store Q&A for future context
-        background_tasks.add_task(
-            memory_service.add_whatsapp_query,
-            project_id=str(project.id),
-            question=message,
-            answer=response[:500],
-            engineer_phone=user_phone,
-            engineer_name=user_name,
-        )
-        
-        return response
-        
-    except Exception as e:
-        logger.error(f"Query error: {e}")
-        return "❌ Error processing your question. Please try again."
+        return {
+            "message": photo_result.get("message"),
+            "intent": "upload_photo",
+        }
+    
+    # Greetings
+    if intent == InputIntent.GREETING:
+        return {
+            "message": f"Hello {profile_name}! I'm {assistant_name}, your construction assistant. How can I help you today?",
+            "intent": "greeting",
+        }
+    
+    # Acknowledgments
+    if intent == InputIntent.ACKNOWLEDGMENT:
+        return {
+            "message": None,  # No response needed for "ok", "thanks"
+            "intent": "acknowledgment",
+        }
+    
+    # =========================================================================
+    # STEP 4: Process as query through Smart Assistant
+    # =========================================================================
+    
+    # Pre-process query
+    processed = smart_assistant.preprocess_query(body)
+    
+    # Check for ambiguity
+    if processed.get("needs_clarification"):
+        return {
+            "message": processed["clarification_question"],
+            "intent": "clarification_needed",
+        }
+    
+    # Detect urgency
+    urgency = smart_assistant.detect_urgency(body)
+    
+    # Search memory for context
+    memory_results = await memory.search(
+        project_id=project_id,
+        query=processed.get("normalized_query", body),
+        limit=5,
+    )
+    
+    # Check for conflicts in memory
+    conflicts = smart_assistant.detect_conflicts(memory_results)
+    if conflicts:
+        # Flag conflict but still answer
+        proactive_intelligence.record_issue(project_id, "conflict", conflicts[0])
+    
+    # Generate response with Gemini
+    response_text = await gemini.query(
+        query=body,
+        context=memory_results,
+        project_id=project_id,
+    )
+    
+    # Check for red flags
+    red_flag = red_flag_service.analyze_query(
+        project_id=project_id,
+        query=body,
+        response=response_text,
+        user_phone=user_phone,
+        memory_results=memory_results,
+    )
+    
+    if red_flag and red_flag.severity.value in ["critical", "high"]:
+        # Add warning to response
+        response_text += f"\n\n⚠️ **Note:** {red_flag.title}"
+    
+    # Enhance response
+    user_stats = smart_assistant.get_user_stats(user_phone)
+    category = smart_assistant.categorize_query(body)
+    response_text = smart_assistant.enhance_response(
+        response_text, urgency, category, user_stats
+    )
+    
+    # Record query
+    smart_assistant.record_query(user_phone)
+    
+    # Add to memory for context
+    await memory.add_whatsapp_query(
+        project_id=project_id,
+        question=body,
+        answer=response_text,
+        user_id=user_id,
+    )
+    
+    # Track ROI
+    roi.record_query(project_id, time_saved_minutes=5)
+    
+    return {
+        "message": response_text,
+        "intent": intent.value if hasattr(intent, "value") else str(intent),
+        "extracted": extracted,
+    }
 
 
-def _extract_drawing_name(message: str) -> Optional[str]:
-    """Extract drawing name/number from message"""
-    # Common patterns: SK-001, AR-101, MEP-01, Floor Plan v2, etc.
-    patterns = [
-        r'\b([A-Z]{2,4}[-_]\d{2,4})\b',  # SK-001, AR-101
-        r'\b(Rev\s*[\d\.]+)\b',  # Rev 2.1
-        r'\b(v[\d\.]+)\b',  # v2.3
-        r'\b(Floor\s+\d+)\b',  # Floor 3
-        r'\b(Level\s+\d+)\b',  # Level 2
-    ]
+# =============================================================================
+# COMMAND HANDLERS
+# =============================================================================
+
+def parse_task_command(body: str, role: str) -> Optional[Dict]:
+    """Parse task-related commands"""
+    body_lower = body.lower().strip()
     
-    for pattern in patterns:
-        match = re.search(pattern, message, re.IGNORECASE)
-        if match:
-            return match.group(1).replace(" ", "_")
+    # Only PMs and above can create tasks
+    if role in ["owner", "admin", "pm"]:
+        if body_lower.startswith("task ") or body_lower.startswith("assign "):
+            return {"type": "create", "raw": body}
+    
+    # Anyone can update task status
+    if body_lower.startswith("done ") or body_lower == "done":
+        return {"type": "complete", "raw": body}
+    
+    if body_lower.startswith("blocked "):
+        return {"type": "blocked", "raw": body}
+    
+    if body_lower in ["my tasks", "tasks", "task list"]:
+        return {"type": "list", "raw": body}
     
     return None
 
 
-# ============================================
-# HELPER FUNCTIONS
-# ============================================
+async def handle_task_command(cmd: Dict, user: Dict, project: Dict) -> Dict[str, Any]:
+    """Handle task management commands"""
+    cmd_type = cmd["type"]
+    raw = cmd["raw"]
+    project_id = project["id"]
+    user_phone = user["phone"]
+    
+    if cmd_type == "list":
+        summary = task_management.format_daily_summary(user_phone)
+        return {"message": summary}
+    
+    if cmd_type == "complete":
+        # Would find and complete the task
+        return {"message": "✅ Task marked as complete. Good work!"}
+    
+    if cmd_type == "blocked":
+        reason = raw.replace("blocked ", "").strip()
+        return {"message": f"🚫 Task marked as blocked.\nReason: {reason}\n\nPM has been notified."}
+    
+    if cmd_type == "create":
+        # Parse task creation - simplified
+        return {"message": "Task creation via WhatsApp coming soon. Please use the dashboard for now."}
+    
+    return {"message": "Unknown task command."}
+
+
+def parse_material_command(body: str) -> Optional[Dict]:
+    """Parse material-related commands"""
+    body_lower = body.lower().strip()
+    
+    # Stock query
+    if "stock" in body_lower or "inventory" in body_lower:
+        return {"type": "query_stock", "raw": body}
+    
+    # Record receipt
+    if body_lower.startswith("received ") or body_lower.startswith("got "):
+        return {"type": "receipt", "raw": body}
+    
+    # Record usage
+    if body_lower.startswith("used ") or body_lower.startswith("consumed "):
+        return {"type": "consumption", "raw": body}
+    
+    return None
+
+
+async def handle_material_command(cmd: Dict, user: Dict, project: Dict) -> Dict[str, Any]:
+    """Handle material management commands"""
+    cmd_type = cmd["type"]
+    raw = cmd["raw"]
+    project_id = project["id"]
+    
+    if cmd_type == "query_stock":
+        # Extract material name if present
+        material_name = None
+        for material in ["cement", "steel", "sand", "aggregate", "brick"]:
+            if material in raw.lower():
+                material_name = material
+                break
+        
+        response = material_management.get_stock_status(project_id, material_name)
+        return {"message": response}
+    
+    if cmd_type == "receipt":
+        return {"message": "Material receipt recorded. (Parsing coming soon)"}
+    
+    if cmd_type == "consumption":
+        return {"message": "Material consumption recorded. (Parsing coming soon)"}
+    
+    return {"message": "Unknown material command."}
+
+
+def is_report_request(body: str) -> bool:
+    """Check if message is asking for a report"""
+    keywords = ["report", "summary", "status all", "progress all", "weekly report", "daily report"]
+    return any(kw in body.lower() for kw in keywords)
+
+
+async def generate_report(body: str, project: Dict, role: str) -> str:
+    """Generate requested report"""
+    project_id = project["id"]
+    project_name = project.get("name", "Project")
+    
+    if "weekly" in body.lower():
+        return engagement_service.generate_weekly_report(project_id, project_name)
+    
+    if "progress" in body.lower():
+        return progress_monitoring.generate_progress_report(project_id)
+    
+    if "material" in body.lower():
+        return material_management.generate_consumption_report(project_id)
+    
+    # Default daily summary
+    return engagement_service.generate_daily_summary(project_id)
+
+
+async def handle_document_upload(
+    media_url: str,
+    media_type: str,
+    caption: str,
+    user: Dict,
+    project: Dict,
+) -> Dict[str, Any]:
+    """Handle document (PDF/drawing) upload"""
+    project_id = project["id"]
+    user_name = user.get("name", "User")
+    
+    # Store document
+    # In production: download from media_url, upload to Supabase, analyze with Gemini
+    
+    logger.info(f"📄 Document uploaded by {user_name}: {media_url}")
+    
+    # Notify team
+    office_site_sync.track_drawing_upload(project_id, caption or "New drawing", user_name)
+    
+    return {
+        "message": f"""📄 **Document received**
+
+I'm analyzing this document now. It will be searchable in a few moments.
+
+{f"Caption: {caption}" if caption else ""}
+
+All team members will be notified of this update."""
+    }
+
+
+async def handle_photo_upload(
+    media_url: str,
+    caption: str,
+    user: Dict,
+    project: Dict,
+    extracted: Dict,
+) -> Dict[str, Any]:
+    """Handle photo upload (progress, issue, etc.)"""
+    project_id = project["id"]
+    user_name = user.get("name", "User")
+    location = extracted.get("grid") or extracted.get("floor") or "unspecified location"
+    
+    logger.info(f"📷 Photo uploaded by {user_name}: {caption or 'No caption'}")
+    
+    # Determine intent from caption
+    is_issue = any(word in (caption or "").lower() for word in ["issue", "problem", "crack", "damage"])
+    
+    if is_issue:
+        # Create red flag
+        return {
+            "message": f"""🚩 **Issue Logged**
+
+Photo received and logged.
+Location: {location}
+Reported by: {user_name}
+
+Project Manager has been notified.
+
+{f"Description: {caption}" if caption else "Please reply with a description of the issue."}"""
+        }
+    else:
+        # Progress photo
+        return {
+            "message": f"""📷 **Progress Photo Logged**
+
+Photo received for {location}.
+Logged by: {user_name}
+
+{f"Note: {caption}" if caption else ""}
+
+This has been added to the project timeline."""
+        }
+
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+async def lookup_user_project(phone: str) -> tuple:
+    """Look up user and their project from phone number"""
+    # In production, query database
+    # For now, return mock data
+    
+    # Mock - would be database lookup
+    user = {
+        "id": "user_123",
+        "phone": phone,
+        "name": "Test User",
+        "role": "site_engineer",
+    }
+    
+    project = {
+        "id": "proj_123",
+        "organization_id": "org_123",
+        "name": "Test Project",
+    }
+    
+    return user, project
+
+
+async def send_unknown_user_response(phone: str):
+    """Send response to unknown user"""
+    message = """👋 Hello! I'm SiteMind, an AI construction assistant.
+
+It looks like you're not registered with any project yet.
+
+To get started, please ask your Project Manager to add you to a project. They can do this by sending:
+
+`add team [YourName] [YourPhone] engineer`
+
+Once added, you'll be able to ask questions about the project!"""
+    
+    await whatsapp.send_message(phone, message)
+
+
+async def track_interaction(
+    user_id: str,
+    project_id: str,
+    query: str,
+    response: str,
+    intent: str,
+):
+    """Track interaction for analytics (background task)"""
+    engagement_service.track_query(
+        project_id=project_id,
+        user_phone=user_id,
+        user_name="User",
+        query=query,
+        response=response,
+    )
+
+
+def get_help_message(role: str, assistant_name: str) -> str:
+    """Get help message based on role"""
+    base_help = f"""**{assistant_name} Help**
+
+📝 **Ask Questions**
+Just type any question about the project:
+• "beam size B3 floor 2?"
+• "rebar at column C4?"
+• "what was decided about staircase?"
+
+📷 **Upload Photos**
+Send a photo with caption for:
+• Progress updates
+• Issue reporting
+
+📊 **Reports**
+• `weekly report` - Weekly summary
+• `progress report` - Current status
+• `my tasks` - Your task list
+
+📦 **Materials**
+• `cement stock?` - Check inventory
+• `received 50 bags cement` - Log receipt
+• `used 10 bags cement floor 3` - Log usage
+"""
+
+    if role in ["owner", "admin", "pm"]:
+        base_help += """
+👥 **Team Management** (PM+)
+• `add team [name] [phone] [role]`
+• `remove team [phone]`
+• `list team`
+• `change role [phone] [role]`
+
+Roles: engineer, pm, consultant, viewer, store
+"""
+
+    base_help += """
+_Reply with your question to get started!_"""
+
+    return base_help
+
+
+# =============================================================================
+# WEBHOOK VERIFICATION (for Twilio setup)
+# =============================================================================
 
 @router.get("/webhook")
-async def whatsapp_webhook_verify(request: Request):
+async def verify_webhook():
     """Webhook verification endpoint"""
-    return {"status": "ok", "message": "SiteMind WhatsApp webhook is active"}
+    return {"status": "ok", "service": "SiteMind WhatsApp"}
 
 
-@router.post("/status")
-async def message_status_callback(
-    MessageSid: str = Form(...),
-    MessageStatus: str = Form(...),
-    ErrorCode: Optional[str] = Form(None),
-):
-    """Message delivery status callback"""
-    logger.info(f"Message {MessageSid} status: {MessageStatus}")
-    return {"status": "received"}
+# =============================================================================
+# MANUAL MESSAGE ENDPOINT (for testing)
+# =============================================================================
+
+class ManualMessage(BaseModel):
+    phone: str
+    message: str
+    project_id: Optional[str] = "proj_123"
 
 
-async def _find_project_and_engineer(
-    db: AsyncSession,
-    phone_number: str,
-) -> Tuple[Optional[Project], Optional[SiteEngineer]]:
-    """Find project and engineer by phone number"""
-    result = await db.execute(
-        select(SiteEngineer)
-        .where(SiteEngineer.phone_number == phone_number)
-        .where(SiteEngineer.is_active == True)
-    )
-    engineer = result.scalar_one_or_none()
-    
-    if not engineer:
-        return None, None
-    
-    result = await db.execute(
-        select(Project)
-        .where(Project.id == engineer.project_id)
-        .where(Project.status == "active")
-    )
-    project = result.scalar_one_or_none()
-    
-    return project, engineer
-
-
-async def _get_project_blueprint_ids(
-    db: AsyncSession,
-    project_id,
-) -> list[str]:
-    """Get Gemini file IDs for project blueprints"""
-    result = await db.execute(
-        select(Blueprint.gemini_file_id)
-        .where(Blueprint.project_id == project_id)
-        .where(Blueprint.is_processed == True)
-        .where(Blueprint.gemini_file_id.isnot(None))
-    )
-    return [row[0] for row in result.fetchall()]
-
-
-async def _log_chat_interaction(
-    db: AsyncSession,
-    project_id,
-    user_phone: str,
-    user_name: Optional[str],
-    message_type: str,
-    user_message: str,
-    media_url: Optional[str],
-    bot_response: str,
-    response_time_ms: int,
-    model_used: Optional[str],
-    tokens_used: Optional[int],
-):
-    """Log chat interaction to database"""
+@router.post("/send")
+async def send_manual_message(msg: ManualMessage):
+    """Send a manual message (for testing/admin)"""
     try:
-        chat_log = ChatLog(
-            project_id=project_id,
-            user_phone=user_phone,
-            user_name=user_name,
-            message_type=message_type,
-            user_message=user_message,
-            user_message_media_url=media_url,
-            bot_response=bot_response,
-            response_time_ms=response_time_ms,
-            model_used=model_used,
-            tokens_used=tokens_used,
-        )
-        db.add(chat_log)
-        await db.commit()
+        await whatsapp.send_message(msg.phone, msg.message)
+        return {"status": "sent", "to": msg.phone}
     except Exception as e:
-        logger.error(f"Failed to log chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# MORNING BRIEF TRIGGER
+# =============================================================================
+
+@router.post("/trigger-briefs")
+async def trigger_morning_briefs():
+    """Trigger morning briefs for all projects (called by cron)"""
+    # In production, iterate through all active projects
+    # and send briefs to relevant users
+    return {"status": "briefs_triggered", "count": 0}

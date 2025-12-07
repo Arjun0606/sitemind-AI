@@ -1,76 +1,80 @@
 """
-SiteMind Configuration Module
-Centralized configuration management using Pydantic Settings
+SiteMind Configuration
+Centralized settings management using Pydantic Settings
+
+All secrets loaded from environment variables.
 """
 
-from functools import lru_cache
+from pydantic_settings import BaseSettings
 from typing import Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables"""
+    """Application settings loaded from environment"""
     
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore"
-    )
+    # ==========================================================================
+    # APP SETTINGS
+    # ==========================================================================
+    APP_NAME: str = "SiteMind"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = False
     
-    # Application
-    app_name: str = "SiteMind"
-    app_env: str = "development"
-    debug: bool = True
-    secret_key: str = "change-me-in-production"
+    # ==========================================================================
+    # GOOGLE GEMINI
+    # ==========================================================================
+    GOOGLE_API_KEY: str = "your_google_api_key"
+    GEMINI_MODEL: str = "gemini-2.0-flash"  # Fast responses
+    GEMINI_PRO_MODEL: str = "gemini-2.5-pro"  # Complex analysis
     
-    # Database
-    database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/sitemind"
-    database_sync_url: str = "postgresql://postgres:password@localhost:5432/sitemind"
+    # ==========================================================================
+    # SUPERMEMORY (Long-term memory)
+    # ==========================================================================
+    SUPERMEMORY_API_KEY: str = "your_supermemory_api_key"
     
-    # Google Gemini 3.0 Pro - State of the art reasoning
-    # https://ai.google.dev/gemini-api/docs/gemini-3
-    google_api_key: str = ""
-    gemini_model: str = "gemini-3-pro-preview"  # Gemini 3.0 - best reasoning
-    gemini_pro_model: str = "gemini-3-pro-preview"  # Same - always use the best
+    # ==========================================================================
+    # TWILIO (WhatsApp)
+    # ==========================================================================
+    TWILIO_ACCOUNT_SID: str = "your_twilio_account_sid"
+    TWILIO_AUTH_TOKEN: str = "your_twilio_auth_token"
+    TWILIO_WHATSAPP_NUMBER: str = "+14155238886"  # Twilio sandbox
     
-    # Gemini 3.0 specific settings
-    gemini_thinking_level: str = "high"  # low, medium, high - controls reasoning depth
-    gemini_media_resolution: str = "high"  # low, medium, high, ultra_high for blueprints
+    # ==========================================================================
+    # SUPABASE (Database + Storage)
+    # ==========================================================================
+    SUPABASE_URL: str = "your_supabase_url"
+    SUPABASE_KEY: str = "your_supabase_anon_key"
+    SUPABASE_SERVICE_KEY: str = "your_supabase_service_key"
     
-    # Supermemory (optional - falls back to in-memory)
-    supermemory_api_key: str = ""
+    # ==========================================================================
+    # DATABASE
+    # ==========================================================================
+    DATABASE_URL: str = "postgresql://localhost:5432/sitemind"
     
-    # Twilio (WhatsApp)
-    twilio_account_sid: str = ""
-    twilio_auth_token: str = ""
-    twilio_whatsapp_number: str = ""
+    # ==========================================================================
+    # STORAGE
+    # ==========================================================================
+    STORAGE_BUCKET: str = "sitemind-files"
     
-    # Supabase (Database + Storage - all in one!)
-    supabase_url: str = ""
-    supabase_key: str = ""  # anon/public key
-    supabase_service_key: str = ""  # service role key for admin ops
+    # ==========================================================================
+    # SECURITY
+    # ==========================================================================
+    SECRET_KEY: str = "your-secret-key-change-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
-    # Sentry
-    sentry_dsn: Optional[str] = None
+    # ==========================================================================
+    # FEATURES
+    # ==========================================================================
+    ENABLE_MORNING_BRIEFS: bool = True
+    ENABLE_RED_FLAGS: bool = True
+    ENABLE_TASK_MANAGEMENT: bool = True
+    ENABLE_MATERIAL_TRACKING: bool = True
     
-    # Rate Limiting - UNLIMITED at $500/site but track for analytics
-    max_queries_per_user_per_day: int = 999999  # Effectively unlimited
-    
-    @property
-    def is_production(self) -> bool:
-        return self.app_env == "production"
-    
-    @property
-    def is_development(self) -> bool:
-        return self.app_env == "development"
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        case_sensitive = True
 
 
-@lru_cache()
-def get_settings() -> Settings:
-    """Get cached settings instance"""
-    return Settings()
-
-
-# Global settings instance
-settings = get_settings()
+# Singleton settings instance
+settings = Settings()

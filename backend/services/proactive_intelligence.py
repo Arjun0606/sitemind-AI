@@ -1,50 +1,147 @@
 """
-SiteMind Proactive Intelligence
-The differentiator - tells you what you NEED to know before you ask
+SiteMind Proactive Intelligence Service
+AI that thinks ahead - not just reactive
 
-PROACTIVE FEATURES:
-1. Morning Brief - Daily summary at 7 AM
-2. Red Flag Alerts - Immediate notification of risks
-3. Pattern Detection - "Many asking about X" = confusion
-4. Deadline Reminders - Pending decisions, overdue tasks
-5. Smart Follow-ups - "Was that issue resolved?"
-6. Predictive Alerts - "Delay likely if..."
+FEATURES:
+- Morning briefs
+- Predictive alerts
+- Pattern detection
+- Recommendations
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-from enum import Enum
-
-from utils.logger import logger
-
-
-class AlertPriority(str, Enum):
-    CRITICAL = "critical"  # Immediate action needed
-    HIGH = "high"          # Address today
-    NORMAL = "normal"      # Informational
-    LOW = "low"            # FYI
+from dataclasses import dataclass, field
+from collections import defaultdict
 
 
-class AlertCategory(str, Enum):
-    RED_FLAG = "red_flag"
-    PENDING_DECISION = "pending_decision"
-    OVERDUE_TASK = "overdue_task"
-    MATERIAL_SHORTAGE = "material_shortage"
-    PROGRESS_DELAY = "progress_delay"
-    COMMUNICATION_GAP = "communication_gap"
-    PATTERN_DETECTED = "pattern_detected"
-    MILESTONE = "milestone"
+@dataclass
+class Insight:
+    id: str
+    project_id: str
+    insight_type: str  # pattern, prediction, recommendation
+    title: str
+    description: str
+    priority: str  # high, medium, low
+    created_at: str
+    dismissed: bool = False
 
 
 class ProactiveIntelligenceService:
     """
-    Generates proactive alerts and insights
+    Generate proactive insights
     """
     
     def __init__(self):
-        self._pending_decisions: Dict[str, List[Dict]] = {}
-        self._query_patterns: Dict[str, Dict[str, int]] = {}
-        self._unresolved_issues: Dict[str, List[Dict]] = {}
+        self._insights: Dict[str, List[Insight]] = {}  # project_id -> insights
+        self._issues: Dict[str, List[Dict]] = {}  # project_id -> issues
+        self._patterns: Dict[str, Dict] = {}  # project_id -> detected patterns
+    
+    # =========================================================================
+    # ISSUE TRACKING (for pattern detection)
+    # =========================================================================
+    
+    def record_issue(
+        self,
+        project_id: str,
+        issue_type: str,
+        description: str,
+        location: str = None,
+    ):
+        """Record an issue for pattern analysis"""
+        if project_id not in self._issues:
+            self._issues[project_id] = []
+        
+        self._issues[project_id].append({
+            "type": issue_type,
+            "description": description,
+            "location": location,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+    
+    # =========================================================================
+    # INSIGHT GENERATION
+    # =========================================================================
+    
+    def generate_insights(self, project_id: str) -> List[Insight]:
+        """Generate insights based on project data"""
+        insights = []
+        
+        # Pattern detection
+        patterns = self._detect_patterns(project_id)
+        for pattern in patterns:
+            insights.append(self._create_insight(
+                project_id=project_id,
+                insight_type="pattern",
+                title=pattern["title"],
+                description=pattern["description"],
+                priority=pattern["priority"],
+            ))
+        
+        return insights
+    
+    def _detect_patterns(self, project_id: str) -> List[Dict]:
+        """Detect patterns in project data"""
+        patterns = []
+        issues = self._issues.get(project_id, [])
+        
+        if not issues:
+            return patterns
+        
+        # Count issues by type
+        by_type = defaultdict(list)
+        for issue in issues[-30:]:  # Last 30 issues
+            by_type[issue["type"]].append(issue)
+        
+        # Check for repeated issues
+        for issue_type, type_issues in by_type.items():
+            if len(type_issues) >= 3:
+                patterns.append({
+                    "title": f"Recurring {issue_type.title()} Issues",
+                    "description": f"There have been {len(type_issues)} {issue_type} issues recently. Consider reviewing root cause.",
+                    "priority": "high" if len(type_issues) >= 5 else "medium",
+                })
+        
+        # Check for location clustering
+        by_location = defaultdict(list)
+        for issue in issues:
+            if issue.get("location"):
+                by_location[issue["location"]].append(issue)
+        
+        for location, loc_issues in by_location.items():
+            if len(loc_issues) >= 3:
+                patterns.append({
+                    "title": f"Multiple Issues at {location}",
+                    "description": f"{len(loc_issues)} issues reported at {location}. Consider site inspection.",
+                    "priority": "medium",
+                })
+        
+        return patterns
+    
+    def _create_insight(
+        self,
+        project_id: str,
+        insight_type: str,
+        title: str,
+        description: str,
+        priority: str,
+    ) -> Insight:
+        """Create and store an insight"""
+        insight = Insight(
+            id=f"insight_{datetime.utcnow().timestamp():.0f}",
+            project_id=project_id,
+            insight_type=insight_type,
+            title=title,
+            description=description,
+            priority=priority,
+            created_at=datetime.utcnow().isoformat(),
+        )
+        
+        if project_id not in self._insights:
+            self._insights[project_id] = []
+        self._insights[project_id].append(insight)
+        
+        return insight
     
     # =========================================================================
     # MORNING BRIEF
@@ -54,334 +151,106 @@ class ProactiveIntelligenceService:
         self,
         project_id: str,
         project_name: str,
-        recipient_role: str,  # pm, owner, site_engineer
-        data: Dict[str, Any],
+        weather: Dict = None,
+        tasks: List[Dict] = None,
+        milestones: List[Dict] = None,
+        low_stock: List[Dict] = None,
+        red_flags: List[Dict] = None,
     ) -> str:
-        """
-        Generate personalized morning brief
+        """Generate comprehensive morning brief"""
+        now = datetime.utcnow()
         
-        Sent automatically at 7 AM to relevant users
-        """
-        brief = f"""**Good morning. Here's your SiteMind brief for {project_name}.**
-_{datetime.utcnow().strftime("%A, %d %B %Y")}_
+        brief = f"""☀️ **Good Morning!**
+
+**Daily Brief** - {project_name}
+{now.strftime("%A, %B %d, %Y")}
 
 """
+
+        # Weather (if available)
+        if weather:
+            brief += f"🌤️ Weather: {weather.get('description', 'Clear')}, {weather.get('temp', '--')}°C\n\n"
         
-        # Critical items first
-        critical_items = data.get("critical_items", [])
-        if critical_items:
-            brief += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            brief += "🚨 **REQUIRES IMMEDIATE ATTENTION**\n"
-            brief += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            for item in critical_items:
-                brief += f"• {item['title']}\n  {item['description']}\n\n"
-        
-        # Red flags
-        red_flags = data.get("red_flags", [])
+        # Red flags first
         if red_flags:
-            brief += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            brief += f"🚩 **RED FLAGS ({len(red_flags)})**\n"
-            brief += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            for flag in red_flags[:3]:  # Top 3
-                brief += f"• **{flag['severity'].upper()}**: {flag['title']}\n"
-                brief += f"  {flag['description'][:100]}...\n\n"
+            brief += "🚨 **Attention Required:**\n"
+            for flag in red_flags[:3]:
+                brief += f"• {flag.get('title', 'Issue')}\n"
+            brief += "\n"
         
-        # Pending decisions
-        pending = data.get("pending_decisions", [])
-        if pending:
-            brief += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            brief += f"⏳ **PENDING DECISIONS ({len(pending)})**\n"
-            brief += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            for item in pending[:5]:
-                days_pending = item.get('days_pending', 0)
-                urgent = " ⚠️" if days_pending > 3 else ""
-                brief += f"• {item['title']}{urgent}\n"
-                brief += f"  Waiting since {days_pending} days\n\n"
+        # Tasks
+        if tasks:
+            pending = [t for t in tasks if t.get("status") == "pending"]
+            brief += f"📋 **Today's Tasks ({len(pending)}):**\n"
+            for task in pending[:5]:
+                brief += f"• {task.get('title', 'Task')}"
+                if task.get("assigned_to"):
+                    brief += f" → {task['assigned_to']}"
+                brief += "\n"
+            brief += "\n"
         
-        # Today's milestones
-        milestones = data.get("todays_milestones", [])
+        # Milestones
         if milestones:
-            brief += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            brief += "📊 **TODAY'S MILESTONES**\n"
-            brief += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            for ms in milestones:
-                brief += f"• {ms['name']} ({ms['location']})\n"
+            brief += "🎯 **Upcoming Milestones:**\n"
+            for ms in milestones[:3]:
+                days = ms.get("days_remaining", "?")
+                brief += f"• {ms.get('name', 'Milestone')} ({days} days)\n"
+            brief += "\n"
         
-        # Material alerts
-        material_alerts = data.get("material_alerts", [])
-        if material_alerts:
-            brief += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            brief += "📦 **MATERIAL ALERTS**\n"
-            brief += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            for alert in material_alerts:
-                critical = "🚨 " if alert.get('critical') else "⚠️ "
-                brief += f"{critical}{alert['material']}: {alert['stock']} {alert['unit']} remaining\n"
+        # Low stock
+        if low_stock:
+            brief += "📦 **Low Stock Alert:**\n"
+            for item in low_stock[:3]:
+                brief += f"• {item.get('name', 'Material')}: {item.get('quantity', 0)} {item.get('unit', '')}\n"
+            brief += "\n"
         
-        # Quick stats (for PM/Owner)
-        if recipient_role in ["pm", "owner"]:
-            stats = data.get("stats", {})
-            brief += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            brief += "📈 **YESTERDAY'S ACTIVITY**\n"
-            brief += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            brief += f"• Queries answered: {stats.get('queries', 0)}\n"
-            brief += f"• Documents uploaded: {stats.get('documents', 0)}\n"
-            brief += f"• Tasks completed: {stats.get('tasks_completed', 0)}\n"
-            brief += f"• Issues flagged: {stats.get('issues', 0)}\n"
+        # Insights
+        insights = self.generate_insights(project_id)
+        if insights:
+            brief += "💡 **Insights:**\n"
+            for insight in insights[:2]:
+                brief += f"• {insight.title}\n"
+            brief += "\n"
         
-        brief += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        brief += "_Reply with any query or 'details [item]' for more info_"
+        brief += "_Reply with any question or 'help' for commands._"
         
         return brief
     
     # =========================================================================
-    # PATTERN DETECTION
+    # QUERIES
     # =========================================================================
     
-    def record_query_topic(self, project_id: str, topic: str):
-        """Record a query topic for pattern detection"""
-        if project_id not in self._query_patterns:
-            self._query_patterns[project_id] = {}
-        
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        key = f"{today}:{topic}"
-        
-        self._query_patterns[project_id][key] = \
-            self._query_patterns[project_id].get(key, 0) + 1
+    def get_active_insights(self, project_id: str) -> List[Insight]:
+        """Get non-dismissed insights"""
+        insights = self._insights.get(project_id, [])
+        return [i for i in insights if not i.dismissed]
     
-    def detect_confusion_pattern(self, project_id: str) -> Optional[Dict]:
-        """Detect if many people asking about same thing"""
-        patterns = self._query_patterns.get(project_id, {})
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        
-        for key, count in patterns.items():
-            if key.startswith(today) and count >= 5:
-                topic = key.split(":")[1]
-                return {
-                    "category": AlertCategory.PATTERN_DETECTED,
-                    "priority": AlertPriority.HIGH,
-                    "title": f"Multiple queries about '{topic}'",
-                    "description": f"{count} queries today about this topic. Possible confusion or unclear specification.",
-                    "recommended_action": "Review specification clarity. Consider sending clarification to team.",
-                }
-        
-        return None
+    def dismiss_insight(self, project_id: str, insight_id: str):
+        """Dismiss an insight"""
+        insights = self._insights.get(project_id, [])
+        for insight in insights:
+            if insight.id == insight_id:
+                insight.dismissed = True
+                break
     
-    # =========================================================================
-    # SMART FOLLOW-UPS
-    # =========================================================================
-    
-    def record_issue(self, project_id: str, issue_id: str, description: str):
-        """Record an issue for follow-up tracking"""
-        if project_id not in self._unresolved_issues:
-            self._unresolved_issues[project_id] = []
-        
-        self._unresolved_issues[project_id].append({
-            "issue_id": issue_id,
-            "description": description,
-            "reported_at": datetime.utcnow().isoformat(),
-            "follow_up_sent": False,
-        })
-    
-    def get_followup_reminders(self, project_id: str) -> List[Dict]:
-        """Get issues that need follow-up"""
-        issues = self._unresolved_issues.get(project_id, [])
-        reminders = []
-        
-        for issue in issues:
-            if issue["follow_up_sent"]:
-                continue
-            
-            reported = datetime.fromisoformat(issue["reported_at"])
-            days_ago = (datetime.utcnow() - reported).days
-            
-            if days_ago >= 2:  # Follow up after 2 days
-                reminders.append({
-                    "category": AlertCategory.RED_FLAG,
-                    "priority": AlertPriority.NORMAL,
-                    "title": "Issue follow-up needed",
-                    "description": f"Issue reported {days_ago} days ago: {issue['description'][:100]}",
-                    "question": "Has this been resolved?",
-                })
-                issue["follow_up_sent"] = True
-        
-        return reminders
-    
-    # =========================================================================
-    # DEADLINE TRACKING
-    # =========================================================================
-    
-    def record_pending_decision(
-        self,
-        project_id: str,
-        decision_id: str,
-        title: str,
-        waiting_from: str,
-    ):
-        """Record a pending decision"""
-        if project_id not in self._pending_decisions:
-            self._pending_decisions[project_id] = []
-        
-        self._pending_decisions[project_id].append({
-            "decision_id": decision_id,
-            "title": title,
-            "waiting_from": waiting_from,
-            "recorded_at": datetime.utcnow().isoformat(),
-        })
-    
-    def get_pending_decision_alerts(self, project_id: str) -> List[Dict]:
-        """Get alerts for pending decisions"""
-        decisions = self._pending_decisions.get(project_id, [])
-        alerts = []
-        
-        for decision in decisions:
-            recorded = datetime.fromisoformat(decision["recorded_at"])
-            days_pending = (datetime.utcnow() - recorded).days
-            
-            if days_pending >= 3:
-                priority = AlertPriority.HIGH if days_pending >= 5 else AlertPriority.NORMAL
-                
-                alerts.append({
-                    "category": AlertCategory.PENDING_DECISION,
-                    "priority": priority,
-                    "title": decision["title"],
-                    "description": f"Waiting for {decision['waiting_from']} since {days_pending} days",
-                    "days_pending": days_pending,
-                })
-        
-        return alerts
-    
-    # =========================================================================
-    # PREDICTIVE ALERTS
-    # =========================================================================
-    
-    def generate_predictive_alerts(
-        self,
-        project_id: str,
-        progress_data: Dict,
-        material_data: Dict,
-    ) -> List[Dict]:
-        """Generate predictive alerts based on data"""
-        alerts = []
-        
-        # Delay prediction
-        delays = progress_data.get("predicted_delays", [])
-        for delay in delays:
-            alerts.append({
-                "category": AlertCategory.PROGRESS_DELAY,
-                "priority": AlertPriority.HIGH,
-                "title": f"Predicted delay: {delay['milestone']}",
-                "description": f"Based on current progress rate, {delay['milestone']} may be delayed by {delay['days']} days.",
-                "recommended_action": "Consider adding resources or adjusting timeline.",
-            })
-        
-        # Material shortage prediction
-        low_stock = material_data.get("low_stock", [])
-        for item in low_stock:
-            days_remaining = item.get("days_remaining", 0)
-            if days_remaining <= 3:
-                alerts.append({
-                    "category": AlertCategory.MATERIAL_SHORTAGE,
-                    "priority": AlertPriority.CRITICAL if days_remaining <= 1 else AlertPriority.HIGH,
-                    "title": f"Material shortage imminent: {item['material']}",
-                    "description": f"Only {days_remaining} days of stock remaining at current consumption rate.",
-                    "recommended_action": "Place order immediately to avoid work stoppage.",
-                })
-        
-        return alerts
-    
-    # =========================================================================
-    # COMMUNICATION GAP DETECTION
-    # =========================================================================
-    
-    def detect_communication_gaps(
-        self,
-        project_id: str,
-        sync_data: Dict,
-    ) -> List[Dict]:
-        """Detect communication gaps"""
-        alerts = []
-        
-        # Unacknowledged drawings
-        unack_drawings = sync_data.get("unacknowledged_drawings", [])
-        for drawing in unack_drawings:
-            if drawing.get("hours_since_upload", 0) >= 24:
-                alerts.append({
-                    "category": AlertCategory.COMMUNICATION_GAP,
-                    "priority": AlertPriority.HIGH,
-                    "title": f"Drawing not acknowledged: {drawing['name']}",
-                    "description": f"Uploaded {drawing['hours_since_upload']} hours ago. {drawing['pending_count']} recipients haven't acknowledged.",
-                    "recommended_action": "Follow up with team to ensure drawing is received.",
-                })
-        
-        # Users not active
-        inactive_users = sync_data.get("inactive_users", [])
-        for user in inactive_users:
-            if user.get("days_inactive", 0) >= 3:
-                alerts.append({
-                    "category": AlertCategory.COMMUNICATION_GAP,
-                    "priority": AlertPriority.NORMAL,
-                    "title": f"User inactive: {user['name']}",
-                    "description": f"No activity in {user['days_inactive']} days.",
-                    "recommended_action": "Verify user still has site access and is using SiteMind.",
-                })
-        
-        return alerts
-    
-    # =========================================================================
-    # AGGREGATED ALERTS
-    # =========================================================================
-    
-    def get_all_alerts(
-        self,
-        project_id: str,
-        include_low_priority: bool = False,
-    ) -> List[Dict]:
-        """Get all current alerts for a project"""
-        alerts = []
-        
-        # Confusion patterns
-        confusion = self.detect_confusion_pattern(project_id)
-        if confusion:
-            alerts.append(confusion)
-        
-        # Pending decisions
-        alerts.extend(self.get_pending_decision_alerts(project_id))
-        
-        # Follow-up reminders
-        alerts.extend(self.get_followup_reminders(project_id))
-        
-        # Sort by priority
-        priority_order = ["critical", "high", "normal", "low"]
-        alerts.sort(key=lambda x: priority_order.index(x.get("priority", "normal")))
-        
-        if not include_low_priority:
-            alerts = [a for a in alerts if a.get("priority") != "low"]
-        
-        return alerts
-    
-    def format_alert_for_whatsapp(self, alert: Dict) -> str:
-        """Format an alert for WhatsApp delivery"""
-        priority_emoji = {
-            "critical": "🚨",
-            "high": "⚠️",
-            "normal": "ℹ️",
-            "low": "📝",
+    def format_insight(self, insight: Insight) -> str:
+        """Format insight for WhatsApp"""
+        icons = {
+            "pattern": "🔄",
+            "prediction": "🔮",
+            "recommendation": "💡",
         }
         
-        emoji = priority_emoji.get(alert.get("priority", "normal"), "ℹ️")
+        icon = icons.get(insight.insight_type, "ℹ️")
         
-        msg = f"{emoji} **{alert['title']}**\n\n"
-        msg += f"{alert['description']}\n"
-        
-        if alert.get("recommended_action"):
-            msg += f"\n**Recommended:** {alert['recommended_action']}"
-        
-        if alert.get("question"):
-            msg += f"\n\n_{alert['question']}_"
-        
-        return msg
+        return f"""{icon} **{insight.title}**
+
+{insight.description}
+
+Priority: {insight.priority.upper()}
+
+_Reply 'dismiss' to clear this insight._"""
 
 
 # Singleton instance
 proactive_intelligence = ProactiveIntelligenceService()
-

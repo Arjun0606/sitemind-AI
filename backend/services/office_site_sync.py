@@ -1,380 +1,226 @@
 """
 SiteMind Office-Site Sync Service
-Bridges the communication gap between office and construction site
-
-PROBLEMS SOLVED:
-1. Drawings sent but not received → Track acknowledgment
-2. Decisions made but not communicated → Auto-notify affected parties
-3. Site updates not reaching office → Real-time sync
-4. Different versions being used → Version control alerts
-5. Verbal instructions lost → Everything documented
+Real-time communication between office and site
 
 FEATURES:
-- Drawing distribution tracking
-- Decision propagation
-- Real-time activity feed
-- Version synchronization
-- Communication logging
+- Drawing update notifications
+- Change order broadcasts
+- RFI routing
+- Daily status sync
 """
 
-from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
-from enum import Enum
-from dataclasses import dataclass, field
-
-from utils.logger import logger
-
-
-class SyncItemType(str, Enum):
-    DRAWING = "drawing"
-    CHANGE_ORDER = "change_order"
-    RFI = "rfi"
-    DECISION = "decision"
-    INSTRUCTION = "instruction"
-    ALERT = "alert"
-
-
-class AcknowledgmentStatus(str, Enum):
-    PENDING = "pending"
-    DELIVERED = "delivered"
-    SEEN = "seen"
-    ACKNOWLEDGED = "acknowledged"
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+from dataclasses import dataclass
 
 
 @dataclass
-class SyncItem:
-    """An item to be synced between office and site"""
-    item_id: str
+class SyncUpdate:
+    id: str
     project_id: str
-    item_type: SyncItemType
+    update_type: str  # drawing, change_order, rfi, announcement
     title: str
     content: str
-    source: str  # "office" or "site"
-    created_by: str
+    from_user: str
+    from_location: str  # office, site
     created_at: str
-    target_recipients: List[str]  # Phone numbers
-    acknowledgments: Dict[str, AcknowledgmentStatus] = field(default_factory=dict)
-    attachments: List[str] = field(default_factory=list)
-    priority: str = "normal"  # normal, high, urgent
+    acknowledged_by: List[str]
 
 
 class OfficeSiteSyncService:
     """
-    Keeps office and site in perfect sync
+    Keep office and site in sync
     """
     
     def __init__(self):
-        self._sync_items: Dict[str, List[SyncItem]] = {}
-        self._user_roles: Dict[str, str] = {}  # phone -> role (office/site/pm)
-        self._project_teams: Dict[str, Dict[str, List[str]]] = {}
+        self._updates: Dict[str, List[SyncUpdate]] = {}  # project_id -> updates
+        self._pending_acks: Dict[str, List[str]] = {}  # update_id -> user_phones pending
     
     # =========================================================================
-    # TEAM MANAGEMENT
+    # UPDATES
     # =========================================================================
     
-    def register_team_member(
+    def broadcast_update(
         self,
         project_id: str,
-        phone: str,
-        name: str,
-        role: str,  # office, site_engineer, pm, consultant
-    ):
-        """Register a team member for sync notifications"""
-        if project_id not in self._project_teams:
-            self._project_teams[project_id] = {
-                "office": [],
-                "site_engineer": [],
-                "pm": [],
-                "consultant": [],
-            }
-        
-        if role in self._project_teams[project_id]:
-            self._project_teams[project_id][role].append(phone)
-        
-        self._user_roles[phone] = role
-    
-    def get_team_by_role(self, project_id: str, role: str) -> List[str]:
-        """Get team members by role"""
-        return self._project_teams.get(project_id, {}).get(role, [])
-    
-    # =========================================================================
-    # SYNC OPERATIONS
-    # =========================================================================
-    
-    def create_sync_item(
-        self,
-        project_id: str,
-        item_type: SyncItemType,
+        update_type: str,
         title: str,
         content: str,
-        created_by: str,
-        target_roles: List[str] = None,
-        target_phones: List[str] = None,
-        priority: str = "normal",
-        attachments: List[str] = None,
-    ) -> SyncItem:
-        """
-        Create a new sync item to be distributed
-        
-        Example: Drawing uploaded by office → notify all site engineers
-        """
-        # Determine recipients
-        recipients = []
-        if target_phones:
-            recipients.extend(target_phones)
-        if target_roles:
-            for role in target_roles:
-                recipients.extend(self.get_team_by_role(project_id, role))
-        
-        # Remove duplicates
-        recipients = list(set(recipients))
-        
-        # Determine source
-        creator_role = self._user_roles.get(created_by, "unknown")
-        source = "office" if creator_role in ["office", "pm"] else "site"
-        
-        item = SyncItem(
-            item_id=f"sync_{int(datetime.utcnow().timestamp() * 1000)}",
+        from_user: str,
+        from_location: str = "office",
+        required_acks: List[str] = None,
+    ) -> SyncUpdate:
+        """Broadcast an update to all team members"""
+        update = SyncUpdate(
+            id=f"sync_{datetime.utcnow().timestamp():.0f}",
             project_id=project_id,
-            item_type=item_type,
+            update_type=update_type,
             title=title,
             content=content,
-            source=source,
-            created_by=created_by,
+            from_user=from_user,
+            from_location=from_location,
             created_at=datetime.utcnow().isoformat(),
-            target_recipients=recipients,
-            acknowledgments={phone: AcknowledgmentStatus.PENDING for phone in recipients},
-            attachments=attachments or [],
-            priority=priority,
+            acknowledged_by=[],
         )
         
-        if project_id not in self._sync_items:
-            self._sync_items[project_id] = []
+        if project_id not in self._updates:
+            self._updates[project_id] = []
+        self._updates[project_id].append(update)
         
-        self._sync_items[project_id].append(item)
+        if required_acks:
+            self._pending_acks[update.id] = required_acks.copy()
         
-        logger.info(f"📤 Sync item created: {title} → {len(recipients)} recipients")
-        
-        return item
+        return update
     
-    def sync_drawing_upload(
+    def acknowledge_update(
+        self,
+        update_id: str,
+        user_phone: str,
+    ) -> bool:
+        """Acknowledge receipt of an update"""
+        # Find the update
+        for updates in self._updates.values():
+            for update in updates:
+                if update.id == update_id:
+                    if user_phone not in update.acknowledged_by:
+                        update.acknowledged_by.append(user_phone)
+                    
+                    # Remove from pending
+                    if update_id in self._pending_acks:
+                        if user_phone in self._pending_acks[update_id]:
+                            self._pending_acks[update_id].remove(user_phone)
+                    
+                    return True
+        
+        return False
+    
+    # =========================================================================
+    # SPECIFIC UPDATE TYPES
+    # =========================================================================
+    
+    def track_drawing_upload(
         self,
         project_id: str,
         drawing_name: str,
-        drawing_url: str,
         uploaded_by: str,
-        revision: str = None,
-        notes: str = None,
-    ) -> SyncItem:
-        """
-        Sync a new drawing upload to all site engineers
-        """
-        content = f"New drawing uploaded: {drawing_name}"
-        if revision:
-            content += f" (Revision: {revision})"
-        if notes:
-            content += f"\n\nNotes: {notes}"
-        
-        content += "\n\nPlease acknowledge receipt."
-        
-        return self.create_sync_item(
+    ) -> SyncUpdate:
+        """Track a new drawing upload"""
+        return self.broadcast_update(
             project_id=project_id,
-            item_type=SyncItemType.DRAWING,
-            title=f"📐 New Drawing: {drawing_name}",
-            content=content,
-            created_by=uploaded_by,
-            target_roles=["site_engineer", "pm"],
-            priority="high",
-            attachments=[drawing_url],
+            update_type="drawing",
+            title=f"New Drawing: {drawing_name}",
+            content=f"A new drawing has been uploaded by {uploaded_by}. Please review and acknowledge.",
+            from_user=uploaded_by,
+            from_location="office",
         )
     
-    def sync_change_order(
+    def track_change_order(
         self,
         project_id: str,
-        change_description: str,
+        description: str,
         affected_area: str,
-        created_by: str,
-    ) -> SyncItem:
-        """
-        Sync a change order to all affected parties
-        """
-        content = f"""Change Order Issued
-
-**Affected Area:** {affected_area}
-
-**Change:** {change_description}
-
-Please confirm you have received and understood this change.
-Reply 'acknowledged' to confirm."""
-        
-        return self.create_sync_item(
+        issued_by: str,
+    ) -> SyncUpdate:
+        """Track a change order"""
+        return self.broadcast_update(
             project_id=project_id,
-            item_type=SyncItemType.CHANGE_ORDER,
-            title=f"🔄 Change Order: {affected_area}",
-            content=content,
-            created_by=created_by,
-            target_roles=["site_engineer", "pm"],
-            priority="urgent",
+            update_type="change_order",
+            title=f"Change Order: {affected_area}",
+            content=f"{description}\n\nIssued by: {issued_by}",
+            from_user=issued_by,
+            from_location="office",
         )
     
-    def sync_decision(
+    def track_site_report(
         self,
         project_id: str,
-        decision: str,
-        context: str,
-        decided_by: str,
-        affected_roles: List[str] = None,
-    ) -> SyncItem:
-        """
-        Sync a decision to relevant parties
-        """
-        content = f"""Decision Recorded
-
-**Decision:** {decision}
-
-**Context:** {context}
-
-**Decided by:** {decided_by}
-
-This decision is now part of the project record."""
-        
-        return self.create_sync_item(
+        report_content: str,
+        reported_by: str,
+    ) -> SyncUpdate:
+        """Track a site report"""
+        return self.broadcast_update(
             project_id=project_id,
-            item_type=SyncItemType.DECISION,
-            title=f"✅ Decision: {decision[:50]}...",
-            content=content,
-            created_by=decided_by,
-            target_roles=affected_roles or ["site_engineer", "pm", "office"],
-            priority="normal",
+            update_type="site_report",
+            title="Daily Site Report",
+            content=report_content,
+            from_user=reported_by,
+            from_location="site",
         )
     
     # =========================================================================
-    # ACKNOWLEDGMENT TRACKING
+    # QUERIES
     # =========================================================================
     
-    def record_acknowledgment(
-        self,
-        item_id: str,
-        phone: str,
-        status: AcknowledgmentStatus = AcknowledgmentStatus.ACKNOWLEDGED,
-    ) -> bool:
-        """Record that someone has acknowledged a sync item"""
-        for project_items in self._sync_items.values():
-            for item in project_items:
-                if item.item_id == item_id and phone in item.acknowledgments:
-                    item.acknowledgments[phone] = status
-                    logger.info(f"✅ Acknowledgment recorded: {phone} → {item.title}")
-                    return True
-        return False
-    
-    def get_pending_acknowledgments(self, project_id: str) -> List[Dict]:
-        """Get items with pending acknowledgments"""
-        items = self._sync_items.get(project_id, [])
-        pending = []
-        
-        for item in items:
-            pending_phones = [
-                phone for phone, status in item.acknowledgments.items()
-                if status == AcknowledgmentStatus.PENDING
-            ]
-            if pending_phones:
-                pending.append({
-                    "item": item,
-                    "pending_from": pending_phones,
-                    "pending_count": len(pending_phones),
-                })
-        
-        return pending
-    
-    def get_user_pending_items(self, phone: str) -> List[SyncItem]:
-        """Get items pending acknowledgment from a specific user"""
-        pending = []
-        
-        for project_items in self._sync_items.values():
-            for item in project_items:
-                if phone in item.acknowledgments:
-                    if item.acknowledgments[phone] == AcknowledgmentStatus.PENDING:
-                        pending.append(item)
-        
-        return pending
-    
-    # =========================================================================
-    # ACTIVITY FEED
-    # =========================================================================
-    
-    def get_activity_feed(
+    def get_pending_updates(
         self,
         project_id: str,
-        limit: int = 20,
-        source_filter: str = None,  # "office", "site", or None for all
-    ) -> List[Dict]:
-        """
-        Get recent activity feed for project
+        user_phone: str,
+    ) -> List[SyncUpdate]:
+        """Get updates not yet acknowledged by user"""
+        updates = self._updates.get(project_id, [])
         
-        Useful for dashboard showing what's happening
-        """
-        items = self._sync_items.get(project_id, [])
+        pending = [
+            u for u in updates 
+            if user_phone not in u.acknowledged_by
+        ]
         
-        if source_filter:
-            items = [i for i in items if i.source == source_filter]
-        
-        # Sort by date, most recent first
-        items.sort(key=lambda x: x.created_at, reverse=True)
-        
-        feed = []
-        for item in items[:limit]:
-            ack_count = sum(1 for s in item.acknowledgments.values() 
-                          if s == AcknowledgmentStatus.ACKNOWLEDGED)
-            total = len(item.acknowledgments)
-            
-            feed.append({
-                "item_id": item.item_id,
-                "type": item.item_type.value,
-                "title": item.title,
-                "source": item.source,
-                "created_by": item.created_by,
-                "created_at": item.created_at,
-                "priority": item.priority,
-                "acknowledgment_status": f"{ack_count}/{total}",
-                "fully_acknowledged": ack_count == total,
-            })
-        
-        return feed
+        return sorted(pending, key=lambda x: x.created_at, reverse=True)
     
-    # =========================================================================
-    # SYNC STATUS REPORTS
-    # =========================================================================
+    def get_pending_acknowledgments(
+        self,
+        update_id: str,
+    ) -> List[str]:
+        """Get list of users who haven't acknowledged"""
+        return self._pending_acks.get(update_id, [])
     
-    def generate_sync_report(self, project_id: str) -> str:
-        """Generate sync status report"""
-        items = self._sync_items.get(project_id, [])
+    def format_update_notification(self, update: SyncUpdate) -> str:
+        """Format update for WhatsApp notification"""
+        icons = {
+            "drawing": "📐",
+            "change_order": "📝",
+            "rfi": "❓",
+            "announcement": "📢",
+            "site_report": "📋",
+        }
         
-        # Stats
-        total_items = len(items)
-        office_to_site = len([i for i in items if i.source == "office"])
-        site_to_office = len([i for i in items if i.source == "site"])
+        icon = icons.get(update.update_type, "ℹ️")
         
-        pending = self.get_pending_acknowledgments(project_id)
-        urgent_pending = [p for p in pending if p["item"].priority == "urgent"]
-        
-        report = f"""
-**Office-Site Sync Status**
+        return f"""{icon} **{update.title}**
 
-Total Items Synced: {total_items}
-• Office → Site: {office_to_site}
-• Site → Office: {site_to_office}
+{update.content}
 
-Pending Acknowledgments: {len(pending)}
-"""
+From: {update.from_user} ({update.from_location})
+Time: {update.created_at[:16]}
+
+_Reply 'ack' to acknowledge._"""
+    
+    def get_sync_status(self, project_id: str) -> str:
+        """Get sync status for project"""
+        updates = self._updates.get(project_id, [])
         
-        if urgent_pending:
-            report += f"\n⚠️ URGENT items pending acknowledgment: {len(urgent_pending)}"
-            for p in urgent_pending[:3]:
-                report += f"\n  • {p['item'].title} ({p['pending_count']} pending)"
+        # Count unacknowledged
+        total_unack = sum(
+            len(self._pending_acks.get(u.id, [])) 
+            for u in updates[-10:]  # Last 10 updates
+        )
         
-        return report
+        recent = updates[-5:] if updates else []
+        
+        if not updates:
+            return "No sync updates yet."
+        
+        status = f"**Sync Status**\n\n"
+        status += f"• Recent updates: {len(recent)}\n"
+        status += f"• Pending acknowledgments: {total_unack}\n\n"
+        
+        if recent:
+            status += "**Recent:**\n"
+            for u in recent[:3]:
+                ack_count = len(u.acknowledged_by)
+                status += f"• {u.title[:30]}... ({ack_count} acks)\n"
+        
+        return status
 
 
 # Singleton instance
 office_site_sync = OfficeSiteSyncService()
-

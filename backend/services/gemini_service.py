@@ -1,23 +1,19 @@
 """
-SiteMind Gemini 3.0 Pro Service
-State-of-the-art AI for blueprint analysis with dynamic reasoning
+SiteMind Gemini Service
+AI-powered construction intelligence using Google Gemini
 
-Gemini 3.0 Pro features used:
-- Dynamic thinking (thinking_level: high) for complex reasoning
-- Media resolution control for reading fine text on blueprints
-- 1M token context for loading all project documents
-- Knowledge cutoff: Jan 2025
-
-Docs: https://ai.google.dev/gemini-api/docs/gemini-3
+FEATURES:
+- Blueprint analysis (text extraction, dimensions, specs)
+- Image understanding (site photos, drawings)
+- Query answering with context
+- Multi-turn conversations
+- Construction-specific prompting
 """
 
-import time
-import asyncio
 from typing import Optional, List, Dict, Any
-from pathlib import Path
-import google.generativeai as genai
-from google.generativeai import GenerativeModel
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+import base64
+import httpx
+import json
 
 from config import settings
 from utils.logger import logger
@@ -25,392 +21,319 @@ from utils.logger import logger
 
 class GeminiService:
     """
-    Google Gemini 3.0 Pro Service
-    State-of-the-art reasoning for construction blueprint analysis
+    Google Gemini API wrapper for construction AI
     """
     
-    # System instruction for SiteMind AI - Gemini 3.0 prefers concise, direct instructions
-    SYSTEM_INSTRUCTION = """You are 'SiteMind', an expert AI Site Engineer for construction projects in India.
-
-ROLE: Help site engineers get instant, accurate answers about blueprints. Prevent costly rework.
-
-RULES:
-1. BE PRECISE - Always cite exact measurements (e.g., "300mm x 600mm")
-2. CITE SOURCES - Reference drawing numbers (e.g., "Drawing ST-04, Grid B2")
-3. FLAG CONFLICTS - Alert if drawings contradict each other
-4. NEVER GUESS - If information isn't in documents, say "I don't have this information"
-5. SAFETY FIRST - Add warnings for safety-critical queries
-
-CITATION FORMAT (ALWAYS USE):
-📐 Drawing: [Number, Page, Grid]
-📅 Date: [When decided]
-✅ Approved by: [Name/Role]
-💡 Reason: [Why this decision was made]
-
-If information changed:
-⬅️ Previous: [Old value]
-➡️ Current: [New value]
-
-Keep responses under 400 words. Direct answer first, then details."""
-
     def __init__(self):
-        """Initialize Gemini 3.0 Pro service"""
-        if not settings.google_api_key:
-            logger.warning("Google API key not configured")
-            self.is_configured = False
-            return
-            
-        genai.configure(api_key=settings.google_api_key)
-        self.is_configured = True
+        self.api_key = settings.GOOGLE_API_KEY
+        self.model = settings.GEMINI_MODEL  # gemini-2.0-flash or gemini-2.5-pro
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
         
-        # Safety settings - allow construction content
-        self.safety_settings = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-        }
-        
-        # Gemini 3.0 generation config
-        # Note: Gemini 3 recommends default temperature (1.0) for complex reasoning tasks
-        # Using thinking_level instead of temperature for reasoning control
-        self.generation_config = genai.GenerationConfig(
-            temperature=1.0,  # Gemini 3 default - don't lower for complex tasks
-            max_output_tokens=8192,  # Gemini 3 supports up to 64k output
-        )
-        
-        # Initialize Gemini 3.0 Pro model
-        self.model = GenerativeModel(
-            model_name=settings.gemini_model,  # gemini-3-pro-preview
-            system_instruction=self.SYSTEM_INSTRUCTION,
-            safety_settings=self.safety_settings,
-            generation_config=self.generation_config,
-        )
-        
-        # Cache for uploaded files
-        self._file_cache: Dict[str, Any] = {}
-        
-        logger.info(f"Gemini 3.0 Pro service initialized: {settings.gemini_model}")
+        # System prompt for construction context
+        self.system_prompt = """You are SiteMind, an expert AI construction assistant. You help site engineers, project managers, and builders with:
+
+1. BLUEPRINT QUERIES: Answer questions about structural specifications, dimensions, rebar details, material grades
+2. CONSTRUCTION KNOWLEDGE: Provide accurate information about construction methods, IS codes, best practices
+3. PROJECT CONTEXT: Use provided context from project memory to give specific answers
+4. SAFETY: Always emphasize safety-critical information
+
+RESPONSE GUIDELINES:
+- Be concise but complete
+- Include specific numbers and references
+- Cite drawings/documents when available (e.g., "Per drawing SK-003...")
+- Use both English and Hindi terms when helpful (e.g., "column (khamba)")
+- If unsure, say so rather than guessing
+- For safety-related queries, always add appropriate warnings
+
+FORMATTING:
+- Use **bold** for important values
+- Use bullet points for lists
+- Keep responses under 500 words unless detailed explanation needed"""
     
-    def _get_thinking_config(self, complexity: str = "high") -> Dict[str, Any]:
-        """
-        Get thinking configuration for Gemini 3.0
-        
-        Args:
-            complexity: "low" for simple queries, "high" for complex analysis
-            
-        Returns:
-            Thinking config dict for generation
-        """
-        # Gemini 3.0's thinking_level controls reasoning depth
-        # high = more reasoning time, better for complex blueprint analysis
-        # low = faster, for simple factual queries
-        return {
-            "thinking_config": {
-                "thinking_level": complexity
-            }
-        }
-    
-    def _get_media_resolution(self, doc_type: str = "blueprint") -> str:
-        """
-        Get optimal media resolution for document type
-        
-        Gemini 3.0 media_resolution options:
-        - low: ~256 tokens per image (fast, rough overview)
-        - medium: ~768 tokens per image (default)
-        - high: ~3072 tokens per image (detailed text reading)
-        - ultra_high: ~6144 tokens per image (fine details, max quality)
-        
-        For construction blueprints with fine text, we use HIGH or ULTRA_HIGH
-        """
-        if doc_type == "blueprint":
-            return "high"  # Good for reading dimensions and annotations
-        elif doc_type == "photo":
-            return "high"  # Need detail for verifying rebar etc
-        elif doc_type == "schedule":
-            return "ultra_high"  # Bar bending schedules have tiny text
-        else:
-            return "medium"
-    
-    async def upload_blueprint(
-        self, 
-        file_path: str,
-        display_name: Optional[str] = None,
-        doc_type: str = "blueprint"
-    ) -> Optional[Dict[str, str]]:
-        """
-        Upload a blueprint PDF to Gemini for analysis
-        
-        Args:
-            file_path: Local path to the PDF file
-            display_name: Optional display name for the file
-            doc_type: Type of document for resolution selection
-        
-        Returns:
-            Dict with file_id and uri, or None if failed
-        """
-        if not self.is_configured:
-            logger.error("Gemini service not configured")
-            return None
-            
-        try:
-            start_time = time.time()
-            
-            # Upload file to Gemini
-            file = genai.upload_file(
-                path=file_path,
-                display_name=display_name or Path(file_path).name,
-            )
-            
-            # Wait for processing to complete
-            while file.state.name == "PROCESSING":
-                await asyncio.sleep(1)
-                file = genai.get_file(file.name)
-            
-            if file.state.name == "FAILED":
-                logger.error(f"File processing failed: {file.name}")
-                return None
-            
-            elapsed = (time.time() - start_time) * 1000
-            logger.info(f"Blueprint uploaded: {file.name} ({elapsed:.0f}ms)")
-            
-            # Cache the file reference with metadata
-            self._file_cache[file.name] = {
-                "file": file,
-                "doc_type": doc_type,
-                "resolution": self._get_media_resolution(doc_type)
-            }
-            
-            return {
-                "file_id": file.name,
-                "uri": file.uri,
-                "display_name": file.display_name,
-                "doc_type": doc_type,
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to upload blueprint: {e}")
-            return None
-    
-    async def analyze_query(
+    async def query(
         self,
         query: str,
-        blueprint_ids: Optional[List[str]] = None,
-        memory_context: Optional[str] = None,
-        image_data: Optional[bytes] = None,
-        thinking_level: str = "high",
-    ) -> Dict[str, Any]:
+        context: List[Dict] = None,
+        project_id: str = None,
+        images: List[str] = None,
+    ) -> str:
         """
-        Analyze a query using Gemini 3.0 Pro with dynamic reasoning
+        Answer a construction query using Gemini
         
         Args:
-            query: User's question
-            blueprint_ids: List of Gemini file IDs to include
-            memory_context: Retrieved context from memory
-            image_data: Optional image bytes (for site photo analysis)
-            thinking_level: "low" for simple, "high" for complex reasoning
-        
+            query: The user's question
+            context: Retrieved context from memory
+            project_id: Project identifier for logging
+            images: Optional list of base64 encoded images
+            
         Returns:
-            Dict with response, confidence, tokens_used, response_time_ms
+            AI-generated response
         """
-        if not self.is_configured:
-            return {
-                "response": "AI service not configured. Please contact support.",
-                "confidence": 0,
-                "tokens_used": 0,
-                "response_time_ms": 0,
-                "error": "Service not configured"
-            }
+        # Build prompt with context
+        prompt = self._build_prompt(query, context)
         
-        start_time = time.time()
+        # Call Gemini API
+        response = await self._call_gemini(prompt, images)
         
-        try:
-            # Build content parts
-            content_parts = []
+        logger.info(f"🤖 Gemini query processed: {query[:50]}...")
+        
+        return response
+    
+    async def analyze_document(
+        self,
+        document_base64: str,
+        document_type: str = "pdf",
+        extraction_focus: str = None,
+    ) -> Dict[str, Any]:
+        """
+        Analyze a construction document (drawing, specification)
+        
+        Args:
+            document_base64: Base64 encoded document
+            document_type: pdf, image, etc.
+            extraction_focus: Specific area to focus on
             
-            # Add memory context if available
-            if memory_context:
-                content_parts.append(f"**PROJECT HISTORY:**\n{memory_context}\n\n---\n\n")
-            
-            # Add blueprints with resolution hints
-            if blueprint_ids:
-                content_parts.append("**BLUEPRINTS:**\n")
-                for file_id in blueprint_ids:
-                    try:
-                        file = genai.get_file(file_id)
-                        # Add file with media resolution hint for Gemini 3.0
-                        content_parts.append(file)
-                    except Exception as e:
-                        logger.warning(f"Could not retrieve file {file_id}: {e}")
-                content_parts.append("\n---\n\n")
-            
-            # Add image if provided (site photo)
-            if image_data:
-                content_parts.append({
-                    "mime_type": "image/jpeg",
-                    "data": image_data
-                })
-                content_parts.append("\n**SITE PHOTO** (verify against blueprints)\n\n")
-            
-            # Add the user query
-            content_parts.append(f"**QUERY:** {query}")
-            
-            # Generate with Gemini 3.0's thinking capability
-            # Using the new thinking_config for controlled reasoning
-            response = await asyncio.to_thread(
-                self.model.generate_content,
-                content_parts,
-                generation_config=genai.GenerationConfig(
-                    temperature=1.0,  # Gemini 3 default
-                    max_output_tokens=8192,
-                )
-                # Note: thinking_config would be added here when SDK supports it
-                # For now, Gemini 3 uses dynamic thinking by default with "high" level
-            )
-            
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            
-            # Extract response
-            response_text = response.text if response.text else "I couldn't generate a response. Please try rephrasing your question."
-            
-            # Get actual token usage from response metadata if available
-            tokens_used = 0
-            if hasattr(response, 'usage_metadata'):
-                tokens_used = getattr(response.usage_metadata, 'total_token_count', 0)
-            else:
-                # Estimate if not available
-                tokens_used = len(query.split()) * 1.5 + len(response_text.split()) * 1.5
-            
-            logger.info(f"Query processed in {elapsed_ms}ms (Gemini 3.0 Pro, thinking={thinking_level})")
-            
-            return {
-                "response": response_text,
-                "confidence": 0.95,
-                "tokens_used": int(tokens_used),
-                "response_time_ms": elapsed_ms,
-                "model_used": settings.gemini_model,
-                "thinking_level": thinking_level,
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to analyze query: {e}")
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            return {
-                "response": "I encountered an error processing your query. Please try again.",
-                "confidence": 0,
-                "tokens_used": 0,
-                "response_time_ms": elapsed_ms,
-                "error": str(e)
-            }
+        Returns:
+            Extracted information
+        """
+        prompt = f"""Analyze this construction document and extract:
+
+1. DOCUMENT TYPE: (structural drawing, architectural plan, specification, etc.)
+2. DRAWING NUMBER: If visible
+3. REVISION: If visible
+4. KEY SPECIFICATIONS:
+   - Dimensions (beams, columns, slabs)
+   - Rebar details (bar sizes, spacing)
+   - Material grades
+   - Grid references
+5. NOTES: Any important notes or instructions
+
+{f"Focus especially on: {extraction_focus}" if extraction_focus else ""}
+
+Return structured information that can be searched later."""
+
+        response = await self._call_gemini(prompt, [document_base64])
+        
+        return {
+            "analysis": response,
+            "document_type": document_type,
+            "timestamp": "now",
+        }
     
     async def analyze_site_photo(
         self,
-        image_data: bytes,
-        query: str,
-        blueprint_ids: Optional[List[str]] = None,
+        photo_base64: str,
+        caption: str = None,
+        expected_work: str = None,
     ) -> Dict[str, Any]:
         """
-        Analyze a site photo against blueprints
-        Uses HIGH thinking level for visual comparison
+        Analyze a site photo for progress/quality
         
         Args:
-            image_data: Image bytes
-            query: User's question about the photo
-            blueprint_ids: Related blueprint IDs
-        
+            photo_base64: Base64 encoded image
+            caption: User's caption
+            expected_work: What work should be visible
+            
         Returns:
-            Analysis result with verification
+            Analysis results
         """
-        # Enhance query for photo verification
-        enhanced_query = f"""Analyze this site photo and verify against the blueprints.
+        prompt = f"""Analyze this construction site photo:
 
-User's question: {query}
+{f"Caption from engineer: {caption}" if caption else ""}
+{f"Expected work: {expected_work}" if expected_work else ""}
 
-Please check:
-1. Does what's shown match the drawings?
-2. Are dimensions/spacing correct?
-3. Any visible issues or discrepancies?
+Identify:
+1. WORK VISIBLE: What construction activity is shown
+2. STAGE: What construction stage does this appear to be
+3. ESTIMATED PROGRESS: Rough percentage if determinable
+4. QUALITY OBSERVATIONS: Any visible issues or concerns
+5. SAFETY: Any safety concerns visible
 
-If you spot potential issues, flag them clearly with ⚠️"""
+Be specific and practical in your assessment."""
+
+        response = await self._call_gemini(prompt, [photo_base64])
         
-        return await self.analyze_query(
-            query=enhanced_query,
-            blueprint_ids=blueprint_ids,
-            image_data=image_data,
-            thinking_level="high",  # Use deep reasoning for photo analysis
-        )
+        return {
+            "analysis": response,
+            "caption": caption,
+        }
     
-    async def quick_lookup(
+    async def detect_conflicts(
         self,
-        query: str,
-        blueprint_ids: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        items: List[Dict],
+    ) -> List[Dict]:
         """
-        Fast lookup for simple factual queries
-        Uses LOW thinking level for speed
+        Detect conflicts between multiple specifications
         
         Args:
-            query: Simple factual question
-            blueprint_ids: Blueprint IDs to search
-        
+            items: List of specifications/decisions to compare
+            
         Returns:
-            Quick response
+            List of detected conflicts
         """
-        return await self.analyze_query(
-            query=query,
-            blueprint_ids=blueprint_ids,
-            thinking_level="low",  # Fast mode for simple queries
-        )
+        if len(items) < 2:
+            return []
+        
+        prompt = f"""Compare these construction specifications and identify any conflicts:
+
+{json.dumps(items, indent=2)}
+
+For each conflict found, provide:
+1. CONFLICT: What values/specs conflict
+2. ITEMS: Which items conflict
+3. SEVERITY: High/Medium/Low
+4. RECOMMENDATION: How to resolve
+
+If no conflicts, return "No conflicts detected"."""
+
+        response = await self._call_gemini(prompt)
+        
+        # Parse response for conflicts
+        # In production, use structured output
+        return [{"raw_analysis": response}]
     
-    def get_file_info(self, file_id: str) -> Optional[Dict[str, Any]]:
-        """Get information about an uploaded file"""
-        try:
-            file = genai.get_file(file_id)
-            return {
-                "file_id": file.name,
-                "display_name": file.display_name,
-                "uri": file.uri,
-                "state": file.state.name,
-                "size_bytes": getattr(file, 'size_bytes', None),
-            }
-        except Exception as e:
-            logger.error(f"Failed to get file info: {e}")
-            return None
+    # =========================================================================
+    # PRIVATE METHODS
+    # =========================================================================
     
-    async def delete_file(self, file_id: str) -> bool:
-        """Delete an uploaded file from Gemini"""
-        try:
-            genai.delete_file(file_id)
-            if file_id in self._file_cache:
-                del self._file_cache[file_id]
-            logger.info(f"File deleted: {file_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to delete file: {e}")
-            return False
+    def _build_prompt(self, query: str, context: List[Dict] = None) -> str:
+        """Build the full prompt with context"""
+        prompt_parts = [self.system_prompt]
+        
+        # Add context if available
+        if context:
+            prompt_parts.append("\n--- PROJECT CONTEXT ---")
+            for i, ctx in enumerate(context[:5], 1):  # Limit context
+                content = ctx.get("content", ctx.get("text", str(ctx)))
+                source = ctx.get("source", "project memory")
+                prompt_parts.append(f"\n[{i}] Source: {source}\n{content}")
+            prompt_parts.append("\n--- END CONTEXT ---\n")
+        
+        # Add the query
+        prompt_parts.append(f"\nUser Query: {query}")
+        prompt_parts.append("\nProvide a helpful, accurate response:")
+        
+        return "\n".join(prompt_parts)
     
-    async def health_check(self) -> Dict[str, Any]:
-        """Check if Gemini 3.0 service is healthy"""
-        if not self.is_configured:
-            return {"status": "not_configured", "error": "API key not set"}
+    async def _call_gemini(
+        self,
+        prompt: str,
+        images: List[str] = None,
+    ) -> str:
+        """Call the Gemini API"""
+        
+        # Check if API key is configured
+        if not self.api_key or self.api_key == "your_google_api_key":
+            logger.warning("Gemini API key not configured, using mock response")
+            return self._mock_response(prompt)
+        
+        # Build request
+        url = f"{self.base_url}/models/{self.model}:generateContent?key={self.api_key}"
+        
+        # Build content parts
+        parts = [{"text": prompt}]
+        
+        # Add images if provided
+        if images:
+            for img in images:
+                parts.append({
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": img,
+                    }
+                })
+        
+        payload = {
+            "contents": [{
+                "parts": parts
+            }],
+            "generationConfig": {
+                "temperature": 0.7,
+                "topP": 0.95,
+                "maxOutputTokens": 2048,
+            },
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
+        }
         
         try:
-            # Simple test query with low thinking for speed
-            response = await asyncio.to_thread(
-                self.model.generate_content,
-                "Reply with exactly 'OK' and nothing else."
-            )
-            
-            if response.text and "OK" in response.text.upper():
-                return {
-                    "status": "healthy", 
-                    "model": settings.gemini_model,
-                    "version": "Gemini 3.0 Pro"
-                }
-            return {"status": "degraded", "error": "Unexpected response"}
-            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, json=payload)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    
+                    # Extract text from response
+                    candidates = result.get("candidates", [])
+                    if candidates:
+                        content = candidates[0].get("content", {})
+                        parts = content.get("parts", [])
+                        if parts:
+                            return parts[0].get("text", "No response generated")
+                    
+                    return "No response generated"
+                else:
+                    error = response.json()
+                    logger.error(f"Gemini API error: {error}")
+                    return f"I encountered an error processing your request. Please try again."
+                    
         except Exception as e:
-            return {"status": "unhealthy", "error": str(e)}
+            logger.error(f"Gemini API exception: {e}")
+            return "I'm having trouble connecting right now. Please try again in a moment."
+    
+    def _mock_response(self, prompt: str) -> str:
+        """Generate mock response for development"""
+        # Extract query from prompt
+        if "beam" in prompt.lower():
+            return """Based on the project specifications:
+
+**Beam B3 at Floor 2**
+- Size: 300 × 600 mm
+- Main reinforcement: 
+  - Top: 4 nos. 20mm dia
+  - Bottom: 4 nos. 20mm dia
+- Stirrups: 8mm @ 150mm c/c
+
+*Reference: Drawing SK-003, Grid B-3*
+
+Note: Always verify on-site dimensions before formwork."""
+
+        elif "column" in prompt.lower() or "khamba" in prompt.lower():
+            return """**Column C4 Specifications:**
+
+- Size: 450 × 450 mm
+- Reinforcement: 8 nos. 20mm dia
+- Ties: 8mm @ 150mm c/c
+- Concrete Grade: M30
+
+*Reference: Drawing SK-001*
+
+The column extends from foundation to terrace level with lap at floor levels."""
+
+        elif "slab" in prompt.lower():
+            return """**Slab Details:**
+
+- Thickness: 150mm
+- Main reinforcement: 10mm @ 150mm c/c (both ways)
+- Distribution: 8mm @ 200mm c/c
+- Cover: 25mm
+
+*Reference: Drawing SK-005*"""
+
+        else:
+            return """I can help you with project specifications. Try asking about:
+
+• Beam dimensions and reinforcement
+• Column specifications
+• Slab details
+• Rebar requirements
+• Material grades
+
+Please provide specific element references (e.g., "B3", "C4") for accurate information."""
 
 
 # Singleton instance

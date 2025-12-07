@@ -1,28 +1,19 @@
 """
 SiteMind Task Management Service
-Live task tracking via WhatsApp - no separate app needed
+Live task assignment and tracking via WhatsApp
 
 FEATURES:
-1. Daily Work Checklists - PM assigns, engineers complete via WhatsApp
-2. Task Status Updates - Real-time visibility for management
-3. Blocker Reporting - Flag issues immediately
-4. Completion Verification - Photo-based task completion
-5. Timeline Tracking - Actual vs planned progress
-
-HOW IT WORKS:
-- PM creates tasks via dashboard or WhatsApp
-- Engineers receive tasks on WhatsApp
-- Engineers update status via WhatsApp: "B2 formwork done"
-- AI logs completion with timestamp
-- Management sees real-time progress
+- Create tasks via WhatsApp
+- Assign to team members
+- Status updates
+- Due date tracking
+- Photo proof of completion
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-from enum import Enum
 from dataclasses import dataclass, field
-
-from utils.logger import logger
+from enum import Enum
 
 
 class TaskStatus(str, Enum):
@@ -31,11 +22,10 @@ class TaskStatus(str, Enum):
     BLOCKED = "blocked"
     COMPLETED = "completed"
     VERIFIED = "verified"
-    CANCELLED = "cancelled"
 
 
 class TaskPriority(str, Enum):
-    CRITICAL = "critical"
+    URGENT = "urgent"
     HIGH = "high"
     NORMAL = "normal"
     LOW = "low"
@@ -43,37 +33,31 @@ class TaskPriority(str, Enum):
 
 @dataclass
 class Task:
-    """A construction task"""
-    task_id: str
+    id: str
     project_id: str
     title: str
     description: str
-    location: str  # e.g., "Floor 3, Grid B2"
-    assigned_to: List[str]  # Phone numbers
-    created_by: str
-    created_at: str
-    due_date: str
-    status: TaskStatus = TaskStatus.PENDING
-    priority: TaskPriority = TaskPriority.NORMAL
+    assigned_to: str  # phone number
+    assigned_by: str
+    status: TaskStatus
+    priority: TaskPriority
+    location: Optional[str] = None
+    due_date: Optional[str] = None
+    created_at: str = ""
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
-    verified_at: Optional[str] = None
-    verified_by: Optional[str] = None
-    blocker: Optional[str] = None
-    completion_notes: Optional[str] = None
-    completion_photos: List[str] = field(default_factory=list)
-    checklist: List[Dict] = field(default_factory=list)  # [{item, completed}]
-    dependencies: List[str] = field(default_factory=list)  # task_ids
+    completion_photo: Optional[str] = None
+    blockers: List[str] = field(default_factory=list)
 
 
 class TaskManagementService:
     """
-    Construction task management via WhatsApp
+    Task management via WhatsApp
     """
     
     def __init__(self):
-        self._tasks: Dict[str, List[Task]] = {}
-        self._user_tasks: Dict[str, List[str]] = {}  # phone -> [task_ids]
+        self._tasks: Dict[str, List[Task]] = {}  # project_id -> tasks
+        self._user_tasks: Dict[str, List[str]] = {}  # phone -> task_ids
     
     # =========================================================================
     # TASK CREATION
@@ -83,192 +67,77 @@ class TaskManagementService:
         self,
         project_id: str,
         title: str,
-        description: str,
-        location: str,
-        assigned_to: List[str],
-        created_by: str,
-        due_date: str,
+        assigned_to: str,
+        assigned_by: str,
+        description: str = "",
+        location: str = None,
+        due_date: str = None,
         priority: TaskPriority = TaskPriority.NORMAL,
-        checklist: List[str] = None,
-        dependencies: List[str] = None,
     ) -> Task:
-        """
-        Create a new task
-        
-        Can be created via dashboard or WhatsApp command
-        """
+        """Create a new task"""
         task = Task(
-            task_id=f"task_{int(datetime.utcnow().timestamp() * 1000)}",
+            id=f"task_{datetime.utcnow().timestamp():.0f}",
             project_id=project_id,
             title=title,
             description=description,
-            location=location,
             assigned_to=assigned_to,
-            created_by=created_by,
-            created_at=datetime.utcnow().isoformat(),
-            due_date=due_date,
+            assigned_by=assigned_by,
+            status=TaskStatus.PENDING,
             priority=priority,
-            checklist=[{"item": item, "completed": False} for item in (checklist or [])],
-            dependencies=dependencies or [],
+            location=location,
+            due_date=due_date,
+            created_at=datetime.utcnow().isoformat(),
         )
         
         if project_id not in self._tasks:
             self._tasks[project_id] = []
-        
         self._tasks[project_id].append(task)
         
-        # Track by user
-        for phone in assigned_to:
-            if phone not in self._user_tasks:
-                self._user_tasks[phone] = []
-            self._user_tasks[phone].append(task.task_id)
-        
-        logger.info(f"📋 Task created: {title} → {len(assigned_to)} assignees")
+        if assigned_to not in self._user_tasks:
+            self._user_tasks[assigned_to] = []
+        self._user_tasks[assigned_to].append(task.id)
         
         return task
     
-    def create_daily_checklist(
-        self,
-        project_id: str,
-        date: str,
-        tasks: List[Dict],  # [{title, location, assigned_to, checklist}]
-        created_by: str,
-    ) -> List[Task]:
-        """
-        Create a daily checklist of tasks
-        
-        Useful for PM to assign morning work
-        """
-        created_tasks = []
-        
-        for task_data in tasks:
-            task = self.create_task(
-                project_id=project_id,
-                title=task_data["title"],
-                description=task_data.get("description", ""),
-                location=task_data.get("location", ""),
-                assigned_to=task_data.get("assigned_to", []),
-                created_by=created_by,
-                due_date=date,
-                checklist=task_data.get("checklist", []),
-            )
-            created_tasks.append(task)
-        
-        return created_tasks
-    
     # =========================================================================
-    # TASK UPDATES (Via WhatsApp)
+    # STATUS UPDATES
     # =========================================================================
     
-    def start_task(self, task_id: str, started_by: str) -> bool:
-        """Mark task as started"""
-        task = self._find_task(task_id)
-        if task and task.status == TaskStatus.PENDING:
-            task.status = TaskStatus.IN_PROGRESS
-            task.started_at = datetime.utcnow().isoformat()
-            logger.info(f"▶️ Task started: {task.title}")
-            return True
-        return False
-    
-    def update_task_status(
-        self,
-        task_id: str,
-        status: TaskStatus,
-        updated_by: str,
-        notes: str = None,
-    ) -> bool:
-        """Update task status"""
+    def start_task(self, task_id: str) -> Optional[Task]:
+        """Mark task as in progress"""
         task = self._find_task(task_id)
         if task:
-            task.status = status
-            
-            if status == TaskStatus.IN_PROGRESS and not task.started_at:
-                task.started_at = datetime.utcnow().isoformat()
-            elif status == TaskStatus.COMPLETED:
-                task.completed_at = datetime.utcnow().isoformat()
-                task.completion_notes = notes
-            
-            logger.info(f"📋 Task updated: {task.title} → {status.value}")
-            return True
-        return False
+            task.status = TaskStatus.IN_PROGRESS
+            task.started_at = datetime.utcnow().isoformat()
+        return task
     
     def complete_task(
         self,
         task_id: str,
-        completed_by: str,
-        notes: str = None,
-        photo_urls: List[str] = None,
-    ) -> bool:
+        completion_photo: str = None,
+    ) -> Optional[Task]:
         """Mark task as completed"""
         task = self._find_task(task_id)
         if task:
             task.status = TaskStatus.COMPLETED
             task.completed_at = datetime.utcnow().isoformat()
-            task.completion_notes = notes
-            if photo_urls:
-                task.completion_photos.extend(photo_urls)
-            
-            logger.info(f"✅ Task completed: {task.title}")
-            return True
-        return False
+            task.completion_photo = completion_photo
+        return task
     
-    def verify_task(
-        self,
-        task_id: str,
-        verified_by: str,
-        approved: bool,
-        notes: str = None,
-    ) -> bool:
-        """Verify a completed task"""
-        task = self._find_task(task_id)
-        if task and task.status == TaskStatus.COMPLETED:
-            if approved:
-                task.status = TaskStatus.VERIFIED
-                task.verified_at = datetime.utcnow().isoformat()
-                task.verified_by = verified_by
-                logger.info(f"✓ Task verified: {task.title}")
-            else:
-                task.status = TaskStatus.IN_PROGRESS  # Send back
-                task.blocker = notes or "Verification failed"
-                logger.info(f"↩️ Task sent back: {task.title}")
-            return True
-        return False
-    
-    def report_blocker(
-        self,
-        task_id: str,
-        reported_by: str,
-        blocker_description: str,
-    ) -> bool:
-        """Report a blocker on a task"""
+    def block_task(self, task_id: str, reason: str) -> Optional[Task]:
+        """Mark task as blocked"""
         task = self._find_task(task_id)
         if task:
             task.status = TaskStatus.BLOCKED
-            task.blocker = blocker_description
-            logger.warning(f"🚫 Task blocked: {task.title} - {blocker_description}")
-            return True
-        return False
+            task.blockers.append(reason)
+        return task
     
-    def complete_checklist_item(
-        self,
-        task_id: str,
-        item_index: int,
-        completed_by: str,
-    ) -> bool:
-        """Complete a checklist item"""
+    def verify_task(self, task_id: str) -> Optional[Task]:
+        """Verify completed task"""
         task = self._find_task(task_id)
-        if task and 0 <= item_index < len(task.checklist):
-            task.checklist[item_index]["completed"] = True
-            task.checklist[item_index]["completed_by"] = completed_by
-            task.checklist[item_index]["completed_at"] = datetime.utcnow().isoformat()
-            
-            # Check if all items complete
-            if all(item["completed"] for item in task.checklist):
-                task.status = TaskStatus.COMPLETED
-                task.completed_at = datetime.utcnow().isoformat()
-            
-            return True
-        return False
+        if task and task.status == TaskStatus.COMPLETED:
+            task.status = TaskStatus.VERIFIED
+        return task
     
     # =========================================================================
     # QUERIES
@@ -276,161 +145,121 @@ class TaskManagementService:
     
     def get_user_tasks(
         self,
-        phone: str,
-        status_filter: TaskStatus = None,
+        user_phone: str,
+        status: TaskStatus = None,
     ) -> List[Task]:
-        """Get tasks assigned to a user"""
-        task_ids = self._user_tasks.get(phone, [])
+        """Get tasks for a user"""
+        task_ids = self._user_tasks.get(user_phone, [])
         tasks = []
         
-        for project_tasks in self._tasks.values():
-            for task in project_tasks:
-                if task.task_id in task_ids:
-                    if status_filter is None or task.status == status_filter:
-                        tasks.append(task)
+        for tid in task_ids:
+            task = self._find_task(tid)
+            if task:
+                if status is None or task.status == status:
+                    tasks.append(task)
         
-        return tasks
+        return sorted(tasks, key=lambda t: t.created_at, reverse=True)
     
     def get_project_tasks(
         self,
         project_id: str,
-        status_filter: TaskStatus = None,
-        date_filter: str = None,
+        status: TaskStatus = None,
     ) -> List[Task]:
-        """Get tasks for a project"""
+        """Get all tasks for a project"""
         tasks = self._tasks.get(project_id, [])
         
-        if status_filter:
-            tasks = [t for t in tasks if t.status == status_filter]
+        if status:
+            tasks = [t for t in tasks if t.status == status]
         
-        if date_filter:
-            tasks = [t for t in tasks if t.due_date == date_filter]
-        
-        return tasks
-    
-    def get_blocked_tasks(self, project_id: str) -> List[Task]:
-        """Get blocked tasks that need attention"""
-        return self.get_project_tasks(project_id, TaskStatus.BLOCKED)
+        return sorted(tasks, key=lambda t: t.created_at, reverse=True)
     
     def get_overdue_tasks(self, project_id: str) -> List[Task]:
         """Get overdue tasks"""
-        today = datetime.utcnow().date().isoformat()
         tasks = self._tasks.get(project_id, [])
+        now = datetime.utcnow().isoformat()
         
-        return [t for t in tasks 
-                if t.due_date < today 
-                and t.status not in [TaskStatus.COMPLETED, TaskStatus.VERIFIED, TaskStatus.CANCELLED]]
+        return [
+            t for t in tasks 
+            if t.due_date and t.due_date < now and t.status not in [TaskStatus.COMPLETED, TaskStatus.VERIFIED]
+        ]
     
     def _find_task(self, task_id: str) -> Optional[Task]:
-        """Find a task by ID"""
+        """Find task by ID"""
         for project_tasks in self._tasks.values():
             for task in project_tasks:
-                if task.task_id == task_id:
+                if task.id == task_id:
                     return task
         return None
     
     # =========================================================================
-    # WHATSAPP INTEGRATION
+    # FORMATTING
     # =========================================================================
     
-    def format_task_for_whatsapp(self, task: Task) -> str:
-        """Format task for WhatsApp display"""
-        status_emoji = {
+    def format_task(self, task: Task) -> str:
+        """Format task for WhatsApp"""
+        status_icons = {
             TaskStatus.PENDING: "⏳",
             TaskStatus.IN_PROGRESS: "🔄",
             TaskStatus.BLOCKED: "🚫",
             TaskStatus.COMPLETED: "✅",
-            TaskStatus.VERIFIED: "✓",
+            TaskStatus.VERIFIED: "✓✓",
         }
         
-        msg = f"""**{status_emoji.get(task.status, '📋')} {task.title}**
-
-📍 Location: {task.location}
-📅 Due: {task.due_date}
-⚡ Priority: {task.priority.value}
-Status: {task.status.value}
-"""
+        priority_icons = {
+            TaskPriority.URGENT: "🔴",
+            TaskPriority.HIGH: "🟠",
+            TaskPriority.NORMAL: "🟢",
+            TaskPriority.LOW: "⚪",
+        }
         
-        if task.checklist:
-            msg += "\n**Checklist:**\n"
-            for i, item in enumerate(task.checklist):
-                check = "✓" if item["completed"] else "○"
-                msg += f"  {check} {item['item']}\n"
+        msg = f"{status_icons[task.status]} **{task.title}**\n"
+        msg += f"Priority: {priority_icons[task.priority]} {task.priority.value}\n"
         
-        if task.blocker:
-            msg += f"\n🚫 Blocker: {task.blocker}"
+        if task.description:
+            msg += f"Details: {task.description}\n"
+        if task.location:
+            msg += f"Location: {task.location}\n"
+        if task.due_date:
+            msg += f"Due: {task.due_date[:10]}\n"
         
-        msg += "\n\n_Reply with status update or 'done' when complete_"
+        if task.blockers:
+            msg += f"\n⚠️ Blocker: {task.blockers[-1]}"
         
         return msg
     
-    def format_daily_summary(self, phone: str) -> str:
-        """Format daily task summary for a user"""
-        tasks = self.get_user_tasks(phone)
-        
-        if not tasks:
-            return "No tasks assigned for today."
+    def format_daily_summary(self, user_phone: str) -> str:
+        """Format daily task summary for user"""
+        tasks = self.get_user_tasks(user_phone)
         
         pending = [t for t in tasks if t.status == TaskStatus.PENDING]
         in_progress = [t for t in tasks if t.status == TaskStatus.IN_PROGRESS]
-        completed = [t for t in tasks if t.status in [TaskStatus.COMPLETED, TaskStatus.VERIFIED]]
         blocked = [t for t in tasks if t.status == TaskStatus.BLOCKED]
         
-        msg = f"""**Your Tasks Today**
-
-Pending: {len(pending)}
-In Progress: {len(in_progress)}
-Completed: {len(completed)}
-Blocked: {len(blocked)}
-"""
+        summary = "**Your Tasks**\n\n"
+        
+        if in_progress:
+            summary += "🔄 **In Progress:**\n"
+            for t in in_progress[:3]:
+                summary += f"• {t.title}\n"
+            summary += "\n"
         
         if pending:
-            msg += "\n**To Do:**\n"
-            for t in pending[:5]:
-                msg += f"• {t.title} ({t.location})\n"
+            summary += "⏳ **Pending:**\n"
+            for t in pending[:3]:
+                summary += f"• {t.title}\n"
+            summary += "\n"
         
         if blocked:
-            msg += "\n**⚠️ Blocked:**\n"
-            for t in blocked:
-                msg += f"• {t.title}: {t.blocker}\n"
+            summary += "🚫 **Blocked:**\n"
+            for t in blocked[:2]:
+                summary += f"• {t.title}: {t.blockers[-1] if t.blockers else 'Unknown'}\n"
+            summary += "\n"
         
-        return msg
-    
-    # =========================================================================
-    # REPORTS
-    # =========================================================================
-    
-    def generate_daily_report(self, project_id: str, date: str = None) -> str:
-        """Generate daily task completion report"""
-        if not date:
-            date = datetime.utcnow().date().isoformat()
+        if not tasks:
+            summary += "No tasks assigned. Enjoy your day! 👍"
         
-        tasks = self.get_project_tasks(project_id, date_filter=date)
-        
-        total = len(tasks)
-        completed = len([t for t in tasks if t.status in [TaskStatus.COMPLETED, TaskStatus.VERIFIED]])
-        blocked = len([t for t in tasks if t.status == TaskStatus.BLOCKED])
-        
-        completion_rate = (completed / total * 100) if total > 0 else 0
-        
-        report = f"""
-**Daily Task Report - {date}**
-
-Total Tasks: {total}
-Completed: {completed}
-Blocked: {blocked}
-Completion Rate: {completion_rate:.1f}%
-
-"""
-        
-        if blocked > 0:
-            report += "**Blocked Tasks:**\n"
-            for t in self.get_blocked_tasks(project_id):
-                report += f"• {t.title}: {t.blocker}\n"
-        
-        return report
+        return summary
 
 
 # Singleton instance
 task_management = TaskManagementService()
-

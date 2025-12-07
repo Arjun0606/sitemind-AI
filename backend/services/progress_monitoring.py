@@ -1,428 +1,239 @@
 """
-SiteMind AI Progress Monitoring Service
-AI-powered construction progress tracking using photos and data
+SiteMind Progress Monitoring Service
+AI-based progress tracking and delay prediction
 
 FEATURES:
-1. Photo-Based Progress - Compare site photos to expected state
-2. Milestone Tracking - Automatic milestone detection
-3. Delay Prediction - AI identifies potential delays early
-4. Quality Monitoring - Detect quality issues from photos
-5. Timeline Analytics - Actual vs planned progress
-6. Predictive Insights - When will this floor be complete?
-
-HOW IT WORKS:
-- Engineers upload daily progress photos via WhatsApp
-- AI compares to drawings and expected progress
-- System tracks % complete per area
-- Management sees real-time progress dashboard
-- AI flags delays before they become critical
+- Activity tracking
+- Progress calculation
+- Delay prediction
+- Milestone management
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-from enum import Enum
-from dataclasses import dataclass, field
-
-from utils.logger import logger
-
-
-class MilestoneStatus(str, Enum):
-    PLANNED = "planned"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    DELAYED = "delayed"
-    VERIFIED = "verified"
-
-
-class WorkStage(str, Enum):
-    # Foundation stages
-    EXCAVATION = "excavation"
-    PCC = "pcc"
-    FOOTING = "footing"
-    PLINTH = "plinth"
-    
-    # Structural stages
-    COLUMN_REBAR = "column_rebar"
-    COLUMN_SHUTTERING = "column_shuttering"
-    COLUMN_POUR = "column_pour"
-    BEAM_REBAR = "beam_rebar"
-    BEAM_SHUTTERING = "beam_shuttering"
-    SLAB_REBAR = "slab_rebar"
-    SLAB_POUR = "slab_pour"
-    DESHUTTERING = "deshuttering"
-    CURING = "curing"
-    
-    # Finishing stages
-    BRICKWORK = "brickwork"
-    PLASTERING = "plastering"
-    FLOORING = "flooring"
-    PAINTING = "painting"
-    
-    # MEP
-    ELECTRICAL_CONDUIT = "electrical_conduit"
-    PLUMBING_ROUGH = "plumbing_rough"
-    HVAC_DUCT = "hvac_duct"
+from dataclasses import dataclass
 
 
 @dataclass
 class Milestone:
-    """A construction milestone"""
-    milestone_id: str
-    project_id: str
+    id: str
     name: str
-    location: str  # e.g., "Floor 3" or "Block A"
-    stage: WorkStage
-    planned_start: str
-    planned_end: str
-    actual_start: Optional[str] = None
-    actual_end: Optional[str] = None
-    status: MilestoneStatus = MilestoneStatus.PLANNED
-    progress_percent: int = 0
-    photos: List[Dict] = field(default_factory=list)  # [{url, date, notes}]
-    issues: List[str] = field(default_factory=list)
-    verified_by: Optional[str] = None
+    planned_date: str
+    actual_date: Optional[str]
+    status: str  # pending, completed, delayed
 
 
 @dataclass
-class ProgressUpdate:
-    """A progress update entry"""
-    update_id: str
-    project_id: str
-    location: str
-    stage: WorkStage
-    progress_percent: int
-    notes: str
-    photo_url: Optional[str]
-    updated_by: str
-    updated_at: str
-    ai_analysis: Optional[str] = None
+class ProjectProgress:
+    overall_percent: float
+    phase: str
+    on_schedule: bool
+    days_ahead_behind: int
+    milestones_completed: int
+    milestones_total: int
 
 
 class ProgressMonitoringService:
     """
-    AI-powered construction progress monitoring
+    Monitor project progress
     """
     
     def __init__(self):
-        self._milestones: Dict[str, List[Milestone]] = {}
-        self._progress_updates: Dict[str, List[ProgressUpdate]] = {}
-        self._area_progress: Dict[str, Dict[str, int]] = {}  # project -> {location: percent}
+        self._milestones: Dict[str, List[Milestone]] = {}  # project_id -> milestones
+        self._activities: Dict[str, List[Dict]] = {}  # project_id -> daily activities
+        self._progress: Dict[str, ProjectProgress] = {}
     
     # =========================================================================
     # MILESTONE MANAGEMENT
     # =========================================================================
     
-    def create_milestone(
+    def add_milestone(
         self,
         project_id: str,
         name: str,
-        location: str,
-        stage: WorkStage,
-        planned_start: str,
-        planned_end: str,
+        planned_date: str,
     ) -> Milestone:
-        """Create a milestone"""
+        """Add a milestone"""
         milestone = Milestone(
-            milestone_id=f"ms_{int(datetime.utcnow().timestamp() * 1000)}",
-            project_id=project_id,
+            id=f"ms_{datetime.utcnow().timestamp():.0f}",
             name=name,
-            location=location,
-            stage=stage,
-            planned_start=planned_start,
-            planned_end=planned_end,
+            planned_date=planned_date,
+            actual_date=None,
+            status="pending",
         )
         
         if project_id not in self._milestones:
             self._milestones[project_id] = []
-        
         self._milestones[project_id].append(milestone)
         
         return milestone
     
-    def update_milestone_progress(
+    def complete_milestone(
         self,
+        project_id: str,
         milestone_id: str,
-        progress_percent: int,
-        notes: str = None,
-        photo_url: str = None,
-    ) -> bool:
-        """Update milestone progress"""
-        milestone = self._find_milestone(milestone_id)
-        if milestone:
-            milestone.progress_percent = progress_percent
-            
-            if photo_url:
-                milestone.photos.append({
-                    "url": photo_url,
-                    "date": datetime.utcnow().isoformat(),
-                    "notes": notes,
-                })
-            
-            # Auto-update status
-            if progress_percent == 0:
-                milestone.status = MilestoneStatus.PLANNED
-            elif progress_percent < 100:
-                milestone.status = MilestoneStatus.IN_PROGRESS
-                if not milestone.actual_start:
-                    milestone.actual_start = datetime.utcnow().isoformat()
-            else:
-                milestone.status = MilestoneStatus.COMPLETED
-                milestone.actual_end = datetime.utcnow().isoformat()
-            
-            # Check for delay
-            if milestone.status == MilestoneStatus.IN_PROGRESS:
-                planned_end = datetime.fromisoformat(milestone.planned_end).date()
-                if datetime.utcnow().date() > planned_end:
-                    milestone.status = MilestoneStatus.DELAYED
-            
-            return True
-        return False
-    
-    def _find_milestone(self, milestone_id: str) -> Optional[Milestone]:
-        """Find milestone by ID"""
-        for project_milestones in self._milestones.values():
-            for ms in project_milestones:
-                if ms.milestone_id == milestone_id:
-                    return ms
-        return None
-    
-    # =========================================================================
-    # PROGRESS UPDATES (Via WhatsApp)
-    # =========================================================================
-    
-    def record_progress(
-        self,
-        project_id: str,
-        location: str,
-        stage: WorkStage,
-        progress_percent: int,
-        notes: str,
-        updated_by: str,
-        photo_url: str = None,
-        ai_analysis: str = None,
-    ) -> ProgressUpdate:
-        """
-        Record a progress update
-        
-        Called when engineer sends progress update via WhatsApp
-        """
-        update = ProgressUpdate(
-            update_id=f"prog_{int(datetime.utcnow().timestamp() * 1000)}",
-            project_id=project_id,
-            location=location,
-            stage=stage,
-            progress_percent=progress_percent,
-            notes=notes,
-            photo_url=photo_url,
-            updated_by=updated_by,
-            updated_at=datetime.utcnow().isoformat(),
-            ai_analysis=ai_analysis,
-        )
-        
-        if project_id not in self._progress_updates:
-            self._progress_updates[project_id] = []
-        
-        self._progress_updates[project_id].append(update)
-        
-        # Update area progress
-        if project_id not in self._area_progress:
-            self._area_progress[project_id] = {}
-        
-        self._area_progress[project_id][location] = progress_percent
-        
-        logger.info(f"📊 Progress recorded: {location} - {stage.value}: {progress_percent}%")
-        
-        return update
-    
-    def analyze_progress_photo(
-        self,
-        project_id: str,
-        location: str,
-        expected_stage: WorkStage,
-        photo_url: str,
-    ) -> Dict[str, Any]:
-        """
-        AI analysis of progress photo
-        
-        Would use Gemini to:
-        - Verify work matches expected stage
-        - Estimate completion percentage
-        - Detect quality issues
-        - Compare to previous photos
-        """
-        # This would call Gemini for actual analysis
-        # Returning mock structure for now
-        return {
-            "location": location,
-            "expected_stage": expected_stage.value,
-            "detected_stage": expected_stage.value,  # Would be AI-detected
-            "estimated_progress": 75,  # Would be AI-estimated
-            "quality_issues": [],
-            "recommendations": [],
-            "analysis_timestamp": datetime.utcnow().isoformat(),
-        }
-    
-    # =========================================================================
-    # DELAY DETECTION & PREDICTION
-    # =========================================================================
-    
-    def detect_delays(self, project_id: str) -> List[Dict]:
-        """Detect current and predicted delays"""
+    ) -> Optional[Milestone]:
+        """Mark milestone complete"""
         milestones = self._milestones.get(project_id, [])
-        delays = []
-        
-        today = datetime.utcnow().date()
         
         for ms in milestones:
-            if ms.status in [MilestoneStatus.COMPLETED, MilestoneStatus.VERIFIED]:
-                continue
-            
-            planned_end = datetime.fromisoformat(ms.planned_end).date()
-            
-            # Current delay
-            if today > planned_end and ms.status != MilestoneStatus.COMPLETED:
-                delay_days = (today - planned_end).days
-                delays.append({
-                    "milestone": ms.name,
-                    "location": ms.location,
-                    "type": "current_delay",
-                    "delay_days": delay_days,
-                    "planned_end": ms.planned_end,
-                    "progress": ms.progress_percent,
-                })
-            
-            # Predicted delay (based on current progress rate)
-            elif ms.status == MilestoneStatus.IN_PROGRESS and ms.actual_start:
-                days_elapsed = (today - datetime.fromisoformat(ms.actual_start).date()).days
-                if days_elapsed > 0 and ms.progress_percent > 0:
-                    daily_progress = ms.progress_percent / days_elapsed
-                    remaining = 100 - ms.progress_percent
-                    days_needed = remaining / daily_progress if daily_progress > 0 else 999
-                    predicted_end = today + timedelta(days=int(days_needed))
-                    
-                    if predicted_end > planned_end:
-                        delays.append({
-                            "milestone": ms.name,
-                            "location": ms.location,
-                            "type": "predicted_delay",
-                            "predicted_delay_days": (predicted_end - planned_end).days,
-                            "planned_end": ms.planned_end,
-                            "predicted_end": predicted_end.isoformat(),
-                            "progress": ms.progress_percent,
-                        })
+            if ms.id == milestone_id:
+                ms.actual_date = datetime.utcnow().isoformat()
+                
+                # Check if delayed
+                if ms.actual_date > ms.planned_date:
+                    ms.status = "delayed"
+                else:
+                    ms.status = "completed"
+                
+                return ms
         
-        return delays
+        return None
     
-    def predict_completion(
+    def get_upcoming_milestones(
         self,
         project_id: str,
+        days: int = 14,
+    ) -> List[Milestone]:
+        """Get upcoming milestones"""
+        milestones = self._milestones.get(project_id, [])
+        cutoff = (datetime.utcnow() + timedelta(days=days)).isoformat()
+        
+        upcoming = [
+            ms for ms in milestones 
+            if ms.status == "pending" and ms.planned_date <= cutoff
+        ]
+        
+        return sorted(upcoming, key=lambda x: x.planned_date)
+    
+    # =========================================================================
+    # ACTIVITY TRACKING
+    # =========================================================================
+    
+    def record_activity(
+        self,
+        project_id: str,
+        activity_type: str,
         location: str,
-    ) -> Dict[str, Any]:
-        """Predict when a location will be complete"""
-        updates = [u for u in self._progress_updates.get(project_id, [])
-                   if u.location == location]
+        description: str,
+        user_phone: str,
+    ):
+        """Record daily activity"""
+        if project_id not in self._activities:
+            self._activities[project_id] = []
         
-        if len(updates) < 2:
-            return {"prediction": "Insufficient data"}
-        
-        # Calculate progress rate
-        first = updates[0]
-        last = updates[-1]
-        
-        days = (datetime.fromisoformat(last.updated_at) - 
-                datetime.fromisoformat(first.updated_at)).days
-        
-        if days > 0:
-            progress_diff = last.progress_percent - first.progress_percent
-            daily_rate = progress_diff / days
-            
-            remaining = 100 - last.progress_percent
-            days_to_complete = remaining / daily_rate if daily_rate > 0 else 999
-            
-            predicted_date = datetime.utcnow() + timedelta(days=int(days_to_complete))
-            
-            return {
-                "location": location,
-                "current_progress": last.progress_percent,
-                "daily_rate": round(daily_rate, 1),
-                "predicted_completion": predicted_date.date().isoformat(),
-                "confidence": "medium" if len(updates) > 5 else "low",
-            }
-        
-        return {"prediction": "Insufficient data"}
+        self._activities[project_id].append({
+            "type": activity_type,
+            "location": location,
+            "description": description,
+            "user": user_phone,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
     
     # =========================================================================
-    # REPORTS
+    # PROGRESS CALCULATION
     # =========================================================================
     
-    def get_project_progress(self, project_id: str) -> Dict[str, Any]:
-        """Get overall project progress"""
+    def calculate_progress(self, project_id: str) -> ProjectProgress:
+        """Calculate overall project progress"""
         milestones = self._milestones.get(project_id, [])
         
         if not milestones:
-            return {"overall_progress": 0, "milestones": []}
+            return ProjectProgress(
+                overall_percent=0,
+                phase="Unknown",
+                on_schedule=True,
+                days_ahead_behind=0,
+                milestones_completed=0,
+                milestones_total=0,
+            )
         
-        total_progress = sum(ms.progress_percent for ms in milestones)
-        overall = total_progress / len(milestones)
+        completed = [ms for ms in milestones if ms.status in ["completed", "delayed"]]
+        pending = [ms for ms in milestones if ms.status == "pending"]
         
-        completed = len([ms for ms in milestones 
-                        if ms.status in [MilestoneStatus.COMPLETED, MilestoneStatus.VERIFIED]])
-        delayed = len([ms for ms in milestones if ms.status == MilestoneStatus.DELAYED])
-        in_progress = len([ms for ms in milestones if ms.status == MilestoneStatus.IN_PROGRESS])
+        overall = (len(completed) / len(milestones)) * 100 if milestones else 0
         
-        return {
-            "overall_progress": round(overall, 1),
-            "total_milestones": len(milestones),
-            "completed": completed,
-            "in_progress": in_progress,
-            "delayed": delayed,
-            "on_track": len(milestones) - completed - delayed - in_progress,
-        }
+        # Determine current phase
+        if overall < 20:
+            phase = "Foundation"
+        elif overall < 50:
+            phase = "Structure"
+        elif overall < 80:
+            phase = "Finishing"
+        else:
+            phase = "Final"
+        
+        # Check schedule
+        delayed_count = len([ms for ms in completed if ms.status == "delayed"])
+        on_schedule = delayed_count == 0
+        
+        return ProjectProgress(
+            overall_percent=round(overall, 1),
+            phase=phase,
+            on_schedule=on_schedule,
+            days_ahead_behind=0,  # Would calculate from actual vs planned
+            milestones_completed=len(completed),
+            milestones_total=len(milestones),
+        )
+    
+    def predict_delay(self, project_id: str) -> Optional[Dict]:
+        """Predict potential delays based on activity patterns"""
+        activities = self._activities.get(project_id, [])
+        
+        if len(activities) < 7:
+            return None  # Not enough data
+        
+        # Simple heuristic: check if activity dropped
+        last_week = [a for a in activities if a["timestamp"] > (datetime.utcnow() - timedelta(days=7)).isoformat()]
+        week_before = [a for a in activities if 
+            (datetime.utcnow() - timedelta(days=14)).isoformat() < a["timestamp"] <= 
+            (datetime.utcnow() - timedelta(days=7)).isoformat()]
+        
+        if week_before and len(last_week) < len(week_before) * 0.5:
+            return {
+                "warning": True,
+                "message": "Activity dropped 50%+ compared to previous week",
+                "recommendation": "Check for blockers or resource issues",
+            }
+        
+        return None
+    
+    # =========================================================================
+    # REPORTING
+    # =========================================================================
     
     def generate_progress_report(self, project_id: str) -> str:
-        """Generate progress report for management"""
-        progress = self.get_project_progress(project_id)
-        delays = self.detect_delays(project_id)
+        """Generate progress report for WhatsApp"""
+        progress = self.calculate_progress(project_id)
+        milestones = self._milestones.get(project_id, [])
+        upcoming = self.get_upcoming_milestones(project_id, 14)
         
-        current_delays = [d for d in delays if d["type"] == "current_delay"]
-        predicted_delays = [d for d in delays if d["type"] == "predicted_delay"]
+        # Progress bar
+        filled = int(progress.overall_percent / 10)
+        bar = "█" * filled + "░" * (10 - filled)
         
-        report = f"""
-**Construction Progress Report**
-Generated: {datetime.utcnow().strftime("%d %b %Y, %H:%M")}
+        report = f"""**Project Progress Report**
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OVERALL PROGRESS: {progress['overall_progress']}%
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+**Overall:** {bar} {progress.overall_percent}%
+**Phase:** {progress.phase}
+**Schedule:** {"✅ On Track" if progress.on_schedule else "⚠️ Delayed"}
 
-Milestones:
-• Total: {progress['total_milestones']}
-• Completed: {progress['completed']}
-• In Progress: {progress['in_progress']}
-• Delayed: {progress['delayed']}
+**Milestones:** {progress.milestones_completed}/{progress.milestones_total} completed
 
 """
+
+        if upcoming:
+            report += "**Upcoming:**\n"
+            for ms in upcoming[:3]:
+                days = (datetime.fromisoformat(ms.planned_date) - datetime.utcnow()).days
+                report += f"• {ms.name} ({days} days)\n"
         
-        if current_delays:
-            report += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            report += "⚠️ CURRENT DELAYS\n"
-            report += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            for d in current_delays:
-                report += f"• {d['milestone']} ({d['location']})\n"
-                report += f"  Delayed by {d['delay_days']} days | Progress: {d['progress']}%\n\n"
-        
-        if predicted_delays:
-            report += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            report += "📊 PREDICTED DELAYS (Action Required)\n"
-            report += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            for d in predicted_delays:
-                report += f"• {d['milestone']} ({d['location']})\n"
-                report += f"  Predicted {d['predicted_delay_days']} days delay\n"
-                report += f"  Planned: {d['planned_end']} | Predicted: {d['predicted_end']}\n\n"
+        delay = self.predict_delay(project_id)
+        if delay:
+            report += f"\n⚠️ **Alert:** {delay['message']}"
         
         return report
 
 
 # Singleton instance
 progress_monitoring = ProgressMonitoringService()
-

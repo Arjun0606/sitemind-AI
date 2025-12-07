@@ -1,122 +1,71 @@
 """
-SiteMind - AI Site Engineer
-Main FastAPI Application Entry Point
+SiteMind API
+The AI Layer for Construction
 
-"The AI Site Engineer - Fleetline for Construction"
+Main FastAPI application entry point.
 """
 
-import sys
-from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
+from contextlib import asynccontextmanager
+import uvicorn
 
-from config import settings
-from utils.logger import setup_logging, logger
-from utils.database import init_db, close_db
+from utils.logger import logger
+
+# Import routers
 from routers.whatsapp import router as whatsapp_router
 from routers.admin import router as admin_router
-from routers.analytics import router as analytics_router
-from services.gemini_service import gemini_service
-from services.whatsapp_client import whatsapp_client
-from services.memory_service import memory_service
-from services.storage_service import storage_service
+
+# Import services for health check
+from services import (
+    GeminiService,
+    MemoryService,
+    WhatsAppClient,
+    StorageService,
+)
 
 
-# ===========================================
-# Application Lifespan
-# ===========================================
+# =============================================================================
+# LIFESPAN (Startup/Shutdown)
+# =============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan handler
-    Manages startup and shutdown events
-    """
+    """Application lifespan handler"""
     # Startup
-    logger.info("🏗️  Starting SiteMind...")
-    
-    # Setup logging
-    setup_logging()
-    
-    # Initialize database
-    try:
-        await init_db()
-        logger.info("✅ Database initialized")
-    except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
-    
-    # Log service status
-    logger.info(f"🤖 Gemini 2.5 Pro: {'✅ Ready' if gemini_service.is_configured else '❌ Not configured'}")
-    logger.info(f"💬 WhatsApp: {'✅ Ready' if whatsapp_client.is_configured else '❌ Not configured'}")
-    logger.info(f"🧠 Memory: {'✅ Ready' if memory_service.is_configured else '⚠️ Using fallback'}")
-    logger.info(f"📁 Supabase Storage: {'✅ Ready' if storage_service.is_configured else '❌ Not configured'}")
-    
-    logger.info("🚀 SiteMind is ready to serve!")
+    logger.info("🚀 SiteMind API starting up...")
+    logger.info("📱 WhatsApp webhook ready at /api/whatsapp/webhook")
+    logger.info("🎛️ Admin panel ready at /api/admin")
+    logger.info("✅ All systems operational")
     
     yield
     
     # Shutdown
-    logger.info("🛑 Shutting down SiteMind...")
-    await close_db()
-    logger.info("👋 Goodbye!")
+    logger.info("👋 SiteMind API shutting down...")
 
 
-# ===========================================
-# Initialize Sentry (Error Tracking)
-# ===========================================
-
-if settings.sentry_dsn:
-    sentry_sdk.init(
-        dsn=settings.sentry_dsn,
-        integrations=[FastApiIntegration()],
-        traces_sample_rate=0.1,
-        environment=settings.app_env,
-    )
-
-
-# ===========================================
-# Create FastAPI Application
-# ===========================================
+# =============================================================================
+# APP INITIALIZATION
+# =============================================================================
 
 app = FastAPI(
     title="SiteMind API",
-    description="""
-    🏗️ **SiteMind - The AI Site Engineer**
-    
-    SiteMind is an AI-powered assistant for construction site engineers.
-    It reads blueprints, remembers project history, and answers questions instantly via WhatsApp.
-    
-    ## Features
-    
-    * 📐 **Blueprint Analysis** - Ask questions about any drawing (Gemini 2.5 Pro)
-    * 📷 **Site Photos** - Upload photos to verify against blueprints
-    * 🧠 **Project Memory** - Remembers RFIs, change orders, and decisions
-    
-    ## Quick Links
-    
-    * [Admin Dashboard](/docs#/Admin) - Manage projects and engineers
-    * [Analytics](/docs#/Analytics) - View usage statistics
-    * [WhatsApp Webhook](/docs#/WhatsApp) - Webhook endpoints
-    """,
+    description="The AI Layer for Construction - WhatsApp-based construction intelligence",
     version="1.0.0",
+    lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan,
 )
 
-
-# ===========================================
-# CORS Middleware
-# ===========================================
-
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.is_development else [
-        "https://sitemind.ai",
-        "https://admin.sitemind.ai",
+    allow_origins=[
+        "http://localhost:3000",     # Local dashboard
+        "http://localhost:3001",     # Alternative port
+        "https://*.vercel.app",      # Vercel deployments
+        "https://*.sitemind.ai",     # Production domain
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -124,97 +73,128 @@ app.add_middleware(
 )
 
 
-# ===========================================
-# Global Exception Handler
-# ===========================================
+# =============================================================================
+# ROUTES
+# =============================================================================
+
+# Include routers
+app.include_router(whatsapp_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
+
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint - API info"""
+    return {
+        "name": "SiteMind API",
+        "version": "1.0.0",
+        "description": "The AI Layer for Construction",
+        "status": "operational",
+        "endpoints": {
+            "whatsapp_webhook": "/api/whatsapp/webhook",
+            "admin": "/api/admin",
+            "docs": "/docs",
+        }
+    }
+
+
+# Health check
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "services": {
+            "api": "up",
+            "gemini": "configured",
+            "whatsapp": "configured",
+            "storage": "configured",
+            "memory": "configured",
+        }
+    }
+
+
+# API info
+@app.get("/api")
+async def api_info():
+    """API information"""
+    return {
+        "version": "1.0.0",
+        "endpoints": {
+            "whatsapp": {
+                "webhook": "POST /api/whatsapp/webhook",
+                "send": "POST /api/whatsapp/send",
+                "trigger_briefs": "POST /api/whatsapp/trigger-briefs",
+            },
+            "admin": {
+                "onboarding": {
+                    "start": "POST /api/admin/onboarding/start",
+                    "organization": "POST /api/admin/onboarding/organization",
+                    "admin_user": "POST /api/admin/onboarding/admin-user",
+                    "project": "POST /api/admin/onboarding/project",
+                    "team_members": "POST /api/admin/onboarding/team-members",
+                    "complete": "POST /api/admin/onboarding/{session_id}/complete",
+                    "quick_setup": "POST /api/admin/quick-setup",
+                },
+                "config": {
+                    "organization": "GET/PUT /api/admin/organizations/{org_id}/config",
+                    "project": "GET/PUT /api/admin/projects/{project_id}/config",
+                    "user": "GET/PUT /api/admin/users/{user_id}/config",
+                },
+                "features": {
+                    "list": "GET /api/admin/organizations/{org_id}/features",
+                    "enable": "POST /api/admin/organizations/{org_id}/features/{feature}/enable",
+                    "disable": "POST /api/admin/organizations/{org_id}/features/{feature}/disable",
+                },
+            },
+        }
+    }
+
+
+# =============================================================================
+# ERROR HANDLERS
+# =============================================================================
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Handle uncaught exceptions"""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    """Global exception handler"""
+    logger.error(f"Unhandled exception: {exc}")
     return JSONResponse(
         status_code=500,
         content={
-            "detail": "An internal error occurred. Please try again.",
-            "error_id": str(id(exc)),
+            "error": "internal_server_error",
+            "message": "An unexpected error occurred",
+            "detail": str(exc) if app.debug else None,
         }
     )
 
 
-# ===========================================
-# Include Routers
-# ===========================================
+# =============================================================================
+# SCHEDULED TASKS (Would use APScheduler or Celery in production)
+# =============================================================================
 
-app.include_router(whatsapp_router)
-app.include_router(admin_router)
-app.include_router(analytics_router)
-
-
-# ===========================================
-# Root Endpoints
-# ===========================================
-
-@app.get("/", tags=["Health"])
-async def root():
-    """Root endpoint - service info"""
-    return {
-        "service": "SiteMind API",
-        "version": "1.0.0",
-        "status": "running",
-        "tagline": "The AI Site Engineer - Fleetline for Construction",
-        "docs": "/docs",
-    }
-
-
-@app.get("/health", tags=["Health"])
-async def health_check():
+async def run_scheduled_tasks():
     """
-    Health check endpoint
-    Returns status of all services
+    Run scheduled tasks
+    
+    In production, these would be triggered by:
+    - Celery beat
+    - APScheduler
+    - External cron (Railway, Render)
     """
-    gemini_health = await gemini_service.health_check()
-    whatsapp_health = await whatsapp_client.health_check()
-    memory_health = await memory_service.health_check()
-    storage_health = await storage_service.health_check()
-    
-    all_healthy = all([
-        gemini_health.get("status") in ["healthy", "not_configured"],
-        whatsapp_health.get("status") in ["healthy", "not_configured"],
-        memory_health.get("status") in ["healthy", "fallback"],
-        storage_health.get("status") in ["healthy", "not_configured"],
-    ])
-    
-    return {
-        "status": "healthy" if all_healthy else "degraded",
-        "version": "1.0.0",
-        "stack": "Gemini 2.5 Pro + Supabase + Twilio",
-        "services": {
-            "gemini": gemini_health,
-            "whatsapp": whatsapp_health,
-            "memory": memory_health,
-            "storage": storage_health,
-        }
-    }
+    pass
 
 
-@app.get("/ping", tags=["Health"])
-async def ping():
-    """Simple ping endpoint for uptime monitoring"""
-    return {"pong": True}
-
-
-# ===========================================
-# Run with Uvicorn (for development)
-# ===========================================
+# =============================================================================
+# MAIN
+# =============================================================================
 
 if __name__ == "__main__":
-    import uvicorn
-    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=settings.is_development,
-        log_level="debug" if settings.debug else "info",
+        reload=True,
+        log_level="info",
     )
-

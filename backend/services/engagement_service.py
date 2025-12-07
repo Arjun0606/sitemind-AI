@@ -1,49 +1,43 @@
 """
 SiteMind Engagement Service
-Professional value tracking for enterprise clients
+Professional communication and reporting
 
-KEEPS:
-- Daily/weekly value summaries (ROI focused)
-- Proactive alerts (drawing updates, trending queries)
-- Time & cost savings tracking
-- Issue detection metrics
-- Professional reports for management
+FEATURES:
+- Morning briefs
+- Daily/weekly summaries
+- Proactive alerts
+- Query tracking
 
-REMOVED:
-- Gamification (no streaks, badges, milestones)
-- Celebratory messages
-- Playful language
-
-TONE: Professional, data-driven, enterprise-grade
+NO GAMIFICATION - Enterprise-focused
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-from enum import Enum
+from dataclasses import dataclass, field
+from collections import defaultdict
 
-from utils.logger import logger
 
-
-class AlertType(str, Enum):
-    DRAWING_UPDATE = "drawing_update"
-    TRENDING_QUERY = "trending_query"
-    ISSUE_DETECTED = "issue_detected"
-    WEEKLY_REPORT = "weekly_report"
-    MONTHLY_ROI = "monthly_roi"
+@dataclass
+class ProjectActivity:
+    """Daily activity for a project"""
+    queries: List[Dict] = field(default_factory=list)
+    documents_uploaded: int = 0
+    issues_flagged: int = 0
+    tasks_completed: int = 0
+    decisions_made: int = 0
 
 
 class EngagementService:
     """
-    Professional value tracking and reporting
+    Professional engagement and reporting
     """
     
     def __init__(self):
-        self._user_metrics: Dict[str, Dict] = {}
-        self._project_metrics: Dict[str, Dict] = {}
-        self._alerts: Dict[str, List[Dict]] = {}
+        self._activity: Dict[str, Dict[str, ProjectActivity]] = {}  # project_id -> date -> activity
+        self._user_queries: Dict[str, List[Dict]] = {}  # user_phone -> queries
     
     # =========================================================================
-    # METRICS TRACKING
+    # ACTIVITY TRACKING
     # =========================================================================
     
     def track_query(
@@ -53,301 +47,231 @@ class EngagementService:
         user_name: str,
         query: str,
         response: str,
-        issue_detected: bool = False,
-        response_time_ms: int = 0,
     ):
-        """Track query metrics for reporting"""
+        """Track a query for reporting"""
+        today = datetime.utcnow().strftime("%Y-%m-%d")
         
-        # User metrics
-        if user_phone not in self._user_metrics:
-            self._user_metrics[user_phone] = {
-                "total_queries": 0,
-                "queries_today": 0,
-                "issues_flagged": 0,
-                "avg_response_time_ms": 0,
-            }
+        if project_id not in self._activity:
+            self._activity[project_id] = {}
+        if today not in self._activity[project_id]:
+            self._activity[project_id][today] = ProjectActivity()
         
-        user = self._user_metrics[user_phone]
-        user["total_queries"] += 1
-        user["queries_today"] += 1
-        if issue_detected:
-            user["issues_flagged"] += 1
+        self._activity[project_id][today].queries.append({
+            "user_phone": user_phone,
+            "user_name": user_name,
+            "query": query,
+            "response": response,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
         
-        # Project metrics
-        if project_id not in self._project_metrics:
-            self._project_metrics[project_id] = {
-                "total_queries": 0,
-                "queries_today": 0,
-                "queries_this_week": 0,
-                "issues_flagged": 0,
-                "active_users": set(),
-                "query_categories": {},
-            }
-        
-        proj = self._project_metrics[project_id]
-        proj["total_queries"] += 1
-        proj["queries_today"] += 1
-        proj["queries_this_week"] += 1
-        proj["active_users"].add(user_phone)
-        if issue_detected:
-            proj["issues_flagged"] += 1
-    
-    def track_drawing_upload(self, project_id: str, drawing_name: str, uploaded_by: str):
-        """Track drawing uploads"""
-        if project_id not in self._project_metrics:
-            self._project_metrics[project_id] = {"drawing_uploads": []}
-        
-        if "drawing_uploads" not in self._project_metrics[project_id]:
-            self._project_metrics[project_id]["drawing_uploads"] = []
-        
-        self._project_metrics[project_id]["drawing_uploads"].append({
-            "drawing": drawing_name,
-            "uploaded_by": uploaded_by,
+        # Track per user
+        if user_phone not in self._user_queries:
+            self._user_queries[user_phone] = []
+        self._user_queries[user_phone].append({
+            "project_id": project_id,
+            "query": query,
             "timestamp": datetime.utcnow().isoformat(),
         })
     
-    def track_change_order(self, project_id: str, description: str):
-        """Track change orders"""
-        if project_id not in self._project_metrics:
-            self._project_metrics[project_id] = {"change_orders": 0}
+    def track_document_upload(self, project_id: str):
+        """Track document upload"""
+        self._get_today_activity(project_id).documents_uploaded += 1
+    
+    def track_issue_flagged(self, project_id: str):
+        """Track issue flagged"""
+        self._get_today_activity(project_id).issues_flagged += 1
+    
+    def track_task_completed(self, project_id: str):
+        """Track task completion"""
+        self._get_today_activity(project_id).tasks_completed += 1
+    
+    def track_decision_made(self, project_id: str):
+        """Track decision made"""
+        self._get_today_activity(project_id).decisions_made += 1
+    
+    def _get_today_activity(self, project_id: str) -> ProjectActivity:
+        """Get today's activity for a project"""
+        today = datetime.utcnow().strftime("%Y-%m-%d")
         
-        self._project_metrics[project_id]["change_orders"] = \
-            self._project_metrics[project_id].get("change_orders", 0) + 1
+        if project_id not in self._activity:
+            self._activity[project_id] = {}
+        if today not in self._activity[project_id]:
+            self._activity[project_id][today] = ProjectActivity()
+        
+        return self._activity[project_id][today]
     
     # =========================================================================
-    # PROFESSIONAL REPORTS
+    # REPORT GENERATION
     # =========================================================================
     
     def generate_daily_summary(self, project_id: str) -> str:
-        """Generate professional daily summary"""
-        proj = self._project_metrics.get(project_id, {})
-        queries = proj.get("queries_today", 0)
+        """Generate daily summary for project"""
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        activity = self._activity.get(project_id, {}).get(today, ProjectActivity())
         
-        if queries == 0:
-            return ""
+        query_count = len(activity.queries)
         
-        time_saved_mins = queries * 5  # Conservative: 5 min per query
-        active_users = len(proj.get("active_users", set()))
-        issues = proj.get("issues_flagged", 0)
+        # Group queries by user
+        by_user = defaultdict(list)
+        for q in activity.queries:
+            by_user[q["user_name"]].append(q)
         
-        summary = f"""**Daily Activity Summary**
-Date: {datetime.utcnow().strftime("%d %b %Y")}
+        summary = f"""**Daily Summary** - {today}
 
-Queries processed: {queries}
-Active users: {active_users}
-Estimated time saved: {time_saved_mins} minutes
-Issues flagged: {issues}
+**Activity Overview:**
+• Queries Answered: {query_count}
+• Documents Uploaded: {activity.documents_uploaded}
+• Issues Flagged: {activity.issues_flagged}
+• Tasks Completed: {activity.tasks_completed}
+"""
 
-All queries logged with full audit trail."""
+        if by_user:
+            summary += "\n**Team Activity:**\n"
+            for user, queries in by_user.items():
+                summary += f"• {user}: {len(queries)} queries\n"
         
-        # Reset daily counters
-        proj["queries_today"] = 0
+        summary += "\n_Reply with any query to get started._"
         
         return summary
     
     def generate_weekly_report(self, project_id: str, project_name: str) -> str:
-        """Generate professional weekly report for management"""
-        proj = self._project_metrics.get(project_id, {})
+        """Generate weekly report for management"""
         
-        queries = proj.get("queries_this_week", 0)
-        time_saved_hours = (queries * 5) / 60
-        active_users = len(proj.get("active_users", set()))
-        issues = proj.get("issues_flagged", 0)
-        change_orders = proj.get("change_orders", 0)
-        drawings = len(proj.get("drawing_uploads", []))
+        # Get last 7 days of activity
+        total_queries = 0
+        total_docs = 0
+        total_issues = 0
+        total_tasks = 0
+        total_decisions = 0
+        daily_breakdown = []
         
-        report = f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SITEMIND WEEKLY REPORT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+        for i in range(7):
+            date = (datetime.utcnow() - timedelta(days=i)).strftime("%Y-%m-%d")
+            activity = self._activity.get(project_id, {}).get(date, ProjectActivity())
+            
+            day_queries = len(activity.queries)
+            total_queries += day_queries
+            total_docs += activity.documents_uploaded
+            total_issues += activity.issues_flagged
+            total_tasks += activity.tasks_completed
+            total_decisions += activity.decisions_made
+            
+            if day_queries > 0 or activity.documents_uploaded > 0:
+                daily_breakdown.append({
+                    "date": date,
+                    "queries": day_queries,
+                    "docs": activity.documents_uploaded,
+                })
+        
+        report = f"""**Weekly Report**
 Project: {project_name}
-Period: Week ending {datetime.utcnow().strftime("%d %b %Y")}
+Period: Last 7 Days
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USAGE METRICS
+SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Queries Answered:     {total_queries}
+Documents Processed:  {total_docs}
+Issues Caught:        {total_issues}
+Tasks Completed:      {total_tasks}
+Decisions Logged:     {total_decisions}
 
-Total Queries:          {queries}
-Active Engineers:       {active_users}
-Drawings Uploaded:      {drawings}
-Change Orders Logged:   {change_orders}
-Issues Flagged:         {issues}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-VALUE METRICS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Estimated Time Saved:   {time_saved_hours:.1f} hours
-(Based on 5 min avg per manual lookup)
-
-Engineering Cost Saved: ₹{time_saved_hours * 500:,.0f}
-(At ₹500/hour engineer time)
-
-Potential Rework Avoided: {issues} issues caught early
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DOCUMENTATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-All queries, decisions, and changes are logged with:
-• Timestamp
-• User identification
-• Source citations
-• Full context
-
-This audit trail is available for export at any time.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
+
+        if daily_breakdown:
+            report += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            report += "DAILY ACTIVITY\n"
+            report += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            for day in daily_breakdown[:5]:  # Show last 5 active days
+                report += f"{day['date']}: {day['queries']} queries, {day['docs']} docs\n"
         
-        # Reset weekly counters
-        proj["queries_this_week"] = 0
+        report += "\n_Full analytics available on the dashboard._"
         
         return report
     
-    def generate_monthly_roi_report(
-        self, 
-        project_id: str, 
-        project_name: str,
-        subscription_cost: float = 500,
-    ) -> str:
-        """Generate monthly ROI report"""
-        proj = self._project_metrics.get(project_id, {})
-        
-        queries = proj.get("total_queries", 0)
-        issues = proj.get("issues_flagged", 0)
-        change_orders = proj.get("change_orders", 0)
-        
-        # Conservative value calculations
-        time_saved_hours = (queries * 5) / 60
-        time_value = time_saved_hours * 500  # ₹500/hr
-        
-        # Issue prevention value (very conservative)
-        issue_value = issues * 25000  # ₹25k avg per issue prevented
-        
-        total_value = time_value + issue_value
-        roi_multiple = total_value / (subscription_cost * 83) if subscription_cost > 0 else 0
-        
-        report = f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MONTHLY ROI REPORT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Project: {project_name}
-Month: {datetime.utcnow().strftime("%B %Y")}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ACTIVITY SUMMARY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Queries Processed:      {queries}
-Issues Flagged:         {issues}
-Change Orders Logged:   {change_orders}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-VALUE CALCULATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Time Savings:
-  {queries} queries × 5 min = {time_saved_hours:.1f} hours
-  {time_saved_hours:.1f} hours × ₹500/hr = ₹{time_value:,.0f}
-
-Issue Prevention (Conservative):
-  {issues} issues × ₹25,000 avg = ₹{issue_value:,.0f}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TOTAL ESTIMATED VALUE: ₹{total_value:,.0f}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Subscription Cost:      ${subscription_cost}/month (₹{subscription_cost * 83:,.0f})
-Estimated ROI:          {roi_multiple:.1f}x
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-NOTES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-• Time savings based on 5 min avg per manual lookup
-• Issue prevention valued conservatively at ₹25,000 each
-• Actual rework costs typically range ₹50,000 - ₹5,00,000
-• Documentation value (legal protection) not quantified
-
-Complete audit trail available for export.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-        return report
-    
     # =========================================================================
-    # PROACTIVE ALERTS (Professional, not gamified)
+    # MORNING BRIEF
     # =========================================================================
     
-    def check_drawing_update_alert(
+    def generate_morning_brief(
         self,
         project_id: str,
-        drawing_name: str,
-        queries_using_old: int,
-    ) -> Optional[str]:
-        """Alert if queries reference outdated drawings"""
-        if queries_using_old >= 3:
-            return f"""**Drawing Update Notice**
-
-Drawing '{drawing_name}' was recently updated. 
-{queries_using_old} queries today may have referenced the previous version.
-
-Recommended action:
-• Confirm all site engineers are aware of the update
-• Verify the latest revision is being used
-
-Reply 'notify team' to send an update to all engineers."""
-        return None
-    
-    def check_trending_query_alert(self, project_id: str) -> Optional[str]:
-        """Detect unusual query patterns"""
-        proj = self._project_metrics.get(project_id, {})
-        categories = proj.get("query_categories", {})
+        project_name: str,
+        pending_tasks: List[Dict] = None,
+        pending_rfis: List[Dict] = None,
+        upcoming_milestones: List[Dict] = None,
+    ) -> str:
+        """Generate morning brief for PM"""
         
-        for category, count in categories.items():
-            if count >= 5:
-                return f"""**Query Pattern Detected**
-
-Multiple queries ({count}) regarding '{category}' today.
-
-This may indicate:
-• Unclear specifications
-• Recent changes not communicated
-• Missing information in drawings
-
-Consider reviewing this area with the project team."""
+        now = datetime.utcnow()
+        greeting = "Good Morning" if now.hour < 12 else "Good Afternoon"
         
-        return None
+        brief = f"""{greeting}! ☀️
+
+**Daily Brief** - {project_name}
+{now.strftime("%B %d, %Y")}
+
+"""
+
+        # Pending tasks
+        if pending_tasks:
+            brief += f"**📋 Pending Tasks ({len(pending_tasks)})**\n"
+            for task in pending_tasks[:3]:
+                brief += f"• {task.get('title', 'Task')}"
+                if task.get("assigned_to"):
+                    brief += f" ({task['assigned_to']})"
+                brief += "\n"
+            if len(pending_tasks) > 3:
+                brief += f"  _...and {len(pending_tasks) - 3} more_\n"
+            brief += "\n"
+        
+        # Pending RFIs
+        if pending_rfis:
+            brief += f"**❓ Pending RFIs ({len(pending_rfis)})**\n"
+            for rfi in pending_rfis[:2]:
+                brief += f"• {rfi.get('question', 'RFI')[:50]}...\n"
+            brief += "\n"
+        
+        # Upcoming milestones
+        if upcoming_milestones:
+            brief += f"**🎯 Upcoming Milestones**\n"
+            for ms in upcoming_milestones[:3]:
+                brief += f"• {ms.get('name', 'Milestone')} - {ms.get('due', 'TBD')}\n"
+            brief += "\n"
+        
+        brief += "_Reply with any question about today's work._"
+        
+        return brief
     
     # =========================================================================
-    # UTILITIES
+    # PROACTIVE ALERTS
     # =========================================================================
     
-    def get_project_metrics(self, project_id: str) -> Dict[str, Any]:
-        """Get current metrics for a project"""
-        proj = self._project_metrics.get(project_id, {})
-        return {
-            "total_queries": proj.get("total_queries", 0),
-            "active_users": len(proj.get("active_users", set())),
-            "issues_flagged": proj.get("issues_flagged", 0),
-            "change_orders": proj.get("change_orders", 0),
-            "drawings_uploaded": len(proj.get("drawing_uploads", [])),
+    def generate_alert(
+        self,
+        alert_type: str,
+        title: str,
+        description: str,
+        priority: str = "high",
+    ) -> str:
+        """Generate formatted alert message"""
+        
+        icons = {
+            "safety": "🚨",
+            "deadline": "⏰",
+            "material": "📦",
+            "weather": "🌧️",
+            "inspection": "📋",
+            "conflict": "⚠️",
         }
-    
-    def reset_daily_metrics(self):
-        """Reset daily counters (call at midnight)"""
-        for proj in self._project_metrics.values():
-            proj["queries_today"] = 0
-        for user in self._user_metrics.values():
-            user["queries_today"] = 0
-    
-    def reset_weekly_metrics(self):
-        """Reset weekly counters (call on Monday)"""
-        for proj in self._project_metrics.values():
-            proj["queries_this_week"] = 0
+        
+        icon = icons.get(alert_type, "⚠️")
+        
+        return f"""{icon} **ALERT: {title}**
+
+{description}
+
+_Reply 'more' for details or 'dismiss' to acknowledge._"""
 
 
 # Singleton instance

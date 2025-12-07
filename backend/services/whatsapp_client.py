@@ -1,43 +1,40 @@
 """
 SiteMind WhatsApp Client
-Twilio WhatsApp Business API integration
+Handles all outbound WhatsApp communication via Twilio
+
+FEATURES:
+- Send text messages
+- Send media (images, documents)
+- Message templates
+- Rate limiting
+- Error handling
 """
 
-import time
+from typing import Optional, List, Dict, Any
+import httpx
+import base64
 import asyncio
-from typing import Optional, Dict, Any, List
-from twilio.rest import Client as TwilioClient
-from twilio.base.exceptions import TwilioRestException
+from datetime import datetime
 
 from config import settings
 from utils.logger import logger
-from utils.helpers import format_phone_number, extract_phone_number
 
 
 class WhatsAppClient:
     """
-    WhatsApp Business API Client using Twilio
-    Handles sending and receiving WhatsApp messages
+    WhatsApp Business API client via Twilio
     """
     
-    # Maximum message length for WhatsApp
-    MAX_MESSAGE_LENGTH = 4096
-    
     def __init__(self):
-        """Initialize WhatsApp client"""
-        if not settings.twilio_account_sid or not settings.twilio_auth_token:
-            logger.warning("Twilio credentials not configured")
-            self.is_configured = False
-            return
+        self.account_sid = settings.TWILIO_ACCOUNT_SID
+        self.auth_token = settings.TWILIO_AUTH_TOKEN
+        self.from_number = settings.TWILIO_WHATSAPP_NUMBER
+        self.base_url = f"https://api.twilio.com/2010-04-01/Accounts/{self.account_sid}/Messages.json"
         
-        self.client = TwilioClient(
-            settings.twilio_account_sid,
-            settings.twilio_auth_token
-        )
-        self.from_number = settings.twilio_whatsapp_number
-        self.is_configured = True
-        
-        logger.info("WhatsApp client initialized successfully")
+        # Rate limiting
+        self._message_count = 0
+        self._last_reset = datetime.utcnow()
+        self._rate_limit = 100  # messages per minute
     
     async def send_message(
         self,
@@ -49,265 +46,225 @@ class WhatsAppClient:
         Send a WhatsApp message
         
         Args:
-            to: Recipient phone number (with or without whatsapp: prefix)
+            to: Recipient phone number (with country code)
             body: Message text
-            media_url: Optional URL to media file (image, PDF)
-        
+            media_url: Optional media URL to attach
+            
         Returns:
-            Dict with message_sid, status, response_time_ms
+            Twilio API response
         """
-        if not self.is_configured:
-            return {
-                "message_sid": None,
-                "status": "failed",
-                "error": "WhatsApp client not configured",
-                "response_time_ms": 0,
-            }
+        # Format numbers
+        to_formatted = self._format_number(to)
+        from_formatted = self._format_number(self.from_number)
         
-        start_time = time.time()
+        # Check rate limit
+        await self._check_rate_limit()
+        
+        # Build payload
+        payload = {
+            "To": f"whatsapp:{to_formatted}",
+            "From": f"whatsapp:{from_formatted}",
+            "Body": body,
+        }
+        
+        if media_url:
+            payload["MediaUrl"] = media_url
+        
+        # Check if configured (for development)
+        if not self.account_sid or self.account_sid == "your_twilio_account_sid":
+            logger.warning(f"📱 [DEV] Would send to {to}: {body[:100]}...")
+            return {"status": "dev_mode", "to": to, "body": body}
         
         try:
-            # Format the recipient number
-            to_formatted = format_phone_number(to)
-            
-            # Truncate message if too long
-            if len(body) > self.MAX_MESSAGE_LENGTH:
-                body = body[:self.MAX_MESSAGE_LENGTH - 50] + "\n\n... (message truncated)"
-            
-            # Build message parameters
-            message_params = {
-                "from_": self.from_number,
-                "to": to_formatted,
-                "body": body,
-            }
-            
-            # Add media if provided
-            if media_url:
-                message_params["media_url"] = [media_url]
-            
-            # Send message (run in thread to avoid blocking)
-            message = await asyncio.to_thread(
-                self._send_message_sync,
-                message_params
-            )
-            
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            
-            logger.info(f"WhatsApp message sent to {to_formatted}: {message.sid} ({elapsed_ms}ms)")
-            
-            return {
-                "message_sid": message.sid,
-                "status": message.status,
-                "response_time_ms": elapsed_ms,
-            }
-            
-        except TwilioRestException as e:
-            logger.error(f"Twilio error sending message: {e}")
-            return {
-                "message_sid": None,
-                "status": "failed",
-                "error": str(e),
-                "response_time_ms": int((time.time() - start_time) * 1000),
-            }
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.base_url,
+                    data=payload,
+                    auth=(self.account_sid, self.auth_token),
+                )
+                
+                if response.status_code == 201:
+                    result = response.json()
+                    logger.info(f"📱 Message sent to {to}: {body[:50]}...")
+                    return {
+                        "status": "sent",
+                        "sid": result.get("sid"),
+                        "to": to,
+                    }
+                else:
+                    error = response.json()
+                    logger.error(f"📱 Failed to send to {to}: {error}")
+                    return {
+                        "status": "error",
+                        "error": error,
+                    }
+                    
         except Exception as e:
-            logger.error(f"Failed to send WhatsApp message: {e}")
+            logger.error(f"📱 WhatsApp error: {e}")
             return {
-                "message_sid": None,
-                "status": "failed",
+                "status": "error",
                 "error": str(e),
-                "response_time_ms": int((time.time() - start_time) * 1000),
             }
     
-    def _send_message_sync(self, params: dict):
-        """Synchronous message send (called via asyncio.to_thread)"""
-        return self.client.messages.create(**params)
-    
-    async def send_template_message(
+    async def send_template(
         self,
         to: str,
-        template_sid: str,
-        variables: Optional[Dict[str, str]] = None,
+        template_name: str,
+        template_params: Dict[str, str],
     ) -> Dict[str, Any]:
         """
-        Send a WhatsApp template message (for initiating conversations)
+        Send a WhatsApp template message
         
-        Args:
-            to: Recipient phone number
-            template_sid: Twilio content template SID
-            variables: Template variables
-        
-        Returns:
-            Dict with message_sid and status
+        For pre-approved message templates (required for initiating conversations)
         """
-        if not self.is_configured:
-            return {
-                "message_sid": None,
-                "status": "failed",
-                "error": "WhatsApp client not configured",
-            }
+        # Template messages require Twilio Content API
+        # For now, fall back to regular message
+        logger.warning("Template messages not yet implemented, using regular message")
         
-        start_time = time.time()
-        
-        try:
-            to_formatted = format_phone_number(to)
-            
-            message_params = {
-                "from_": self.from_number,
-                "to": to_formatted,
-                "content_sid": template_sid,
-            }
-            
-            if variables:
-                message_params["content_variables"] = str(variables)
-            
-            message = await asyncio.to_thread(
-                self._send_message_sync,
-                message_params
-            )
-            
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            
-            return {
-                "message_sid": message.sid,
-                "status": message.status,
-                "response_time_ms": elapsed_ms,
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to send template message: {e}")
-            return {
-                "message_sid": None,
-                "status": "failed",
-                "error": str(e),
-            }
+        # Build message from template
+        body = self._render_template(template_name, template_params)
+        return await self.send_message(to, body)
     
-    async def send_welcome_message(self, to: str, project_name: str) -> Dict[str, Any]:
-        """
-        Send welcome message to a new site engineer
-        
-        Args:
-            to: Engineer's phone number
-            project_name: Name of the project they're added to
-        
-        Returns:
-            Message result
-        """
-        welcome_text = f"""🏗️ *Welcome to SiteMind!*
-
-You've been added as a team member for *{project_name}*.
-
-I'm your AI Site Engineer assistant. I can help you with:
-
-📐 *Blueprint Questions*
-"What's the beam size at grid B2?"
-"Show me column spacing on floor 3"
-
-🎤 *Voice Notes*
-Send me a voice message and I'll understand your query
-
-📷 *Site Photos*
-Send a photo and ask "Is this placement correct?"
-
-💡 *Tips:*
-• Be specific with grid references
-• I'll always cite the drawing number
-• If unsure, I'll tell you to verify with the architect
-
-Let's build something great together! 🚀"""
-        
-        return await self.send_message(to=to, body=welcome_text)
-    
-    async def download_media(self, media_url: str) -> Optional[bytes]:
-        """
-        Download media from Twilio CDN
-        
-        Args:
-            media_url: URL from incoming WhatsApp message
-        
-        Returns:
-            Media content as bytes, or None if failed
-        """
-        try:
-            import httpx
-            
-            # Twilio media URLs require authentication
-            async with httpx.AsyncClient(
-                auth=(settings.twilio_account_sid, settings.twilio_auth_token)
-            ) as client:
-                response = await client.get(media_url, timeout=60.0)
-                response.raise_for_status()
-                return response.content
-                
-        except Exception as e:
-            logger.error(f"Failed to download media: {e}")
-            return None
-    
-    def validate_webhook_signature(
+    async def send_bulk(
         self,
-        signature: str,
-        url: str,
-        params: dict,
-    ) -> bool:
+        recipients: List[Dict[str, str]],
+        body: str,
+        delay_ms: int = 100,
+    ) -> List[Dict[str, Any]]:
         """
-        Validate Twilio webhook signature for security
+        Send message to multiple recipients
         
         Args:
-            signature: X-Twilio-Signature header
-            url: Full webhook URL
-            params: POST parameters
-        
-        Returns:
-            True if valid, False otherwise
+            recipients: List of {phone, name} dicts
+            body: Message body (can use {name} placeholder)
+            delay_ms: Delay between messages to avoid rate limits
         """
-        from twilio.request_validator import RequestValidator
+        results = []
         
-        validator = RequestValidator(settings.twilio_auth_token)
-        return validator.validate(url, params, signature)
+        for recipient in recipients:
+            phone = recipient.get("phone")
+            name = recipient.get("name", "")
+            
+            # Personalize message
+            personalized = body.replace("{name}", name)
+            
+            result = await self.send_message(phone, personalized)
+            results.append({**result, "phone": phone, "name": name})
+            
+            # Small delay between messages
+            await asyncio.sleep(delay_ms / 1000)
+        
+        return results
     
-    def get_message_status(self, message_sid: str) -> Optional[Dict[str, Any]]:
-        """
-        Get the status of a sent message
+    async def send_welcome(self, phone: str, name: str, role: str, org_name: str) -> Dict[str, Any]:
+        """Send welcome message to new user"""
         
-        Args:
-            message_sid: Twilio message SID
+        if role in ["owner", "admin"]:
+            message = f"""Welcome to SiteMind, {name}! 🎉
+
+You're now set up as {role} for {org_name}.
+
+Your team can send any construction query via WhatsApp and get instant, accurate answers.
+
+To get started:
+• Forward any drawing to this number
+• Ask any question about the project
+• Type 'help' for all commands
+
+Questions? Just reply here!"""
         
-        Returns:
-            Dict with status info or None
-        """
-        if not self.is_configured:
-            return None
+        elif role == "pm":
+            message = f"""Welcome to SiteMind, {name}!
+
+You've been added as Project Manager for {org_name}.
+
+You can:
+• Ask any question about project specs
+• Upload documents and photos
+• Create and assign tasks
+• Manage team members
+
+Quick commands:
+• `list team` - See team members
+• `add team [name] [phone] [role]` - Add someone
+• `help` - All commands
+
+Try it now - send any question!"""
         
-        try:
-            message = self.client.messages(message_sid).fetch()
-            return {
-                "sid": message.sid,
-                "status": message.status,
-                "error_code": message.error_code,
-                "error_message": message.error_message,
-            }
-        except Exception as e:
-            logger.error(f"Failed to get message status: {e}")
-            return None
+        else:  # site_engineer, consultant, viewer
+            message = f"""Welcome to SiteMind, {name}!
+
+You've been added to {org_name}'s project team.
+
+I can help you with:
+• Blueprint specifications ("beam size B3?")
+• Rebar details ("sariya at C4?")
+• Material info ("steel grade?")
+
+Just send your question - I respond 24/7!
+
+Type 'help' for all commands.
+
+Try it now: Send any question about the project!"""
+        
+        return await self.send_message(phone, message)
     
-    async def health_check(self) -> Dict[str, Any]:
-        """Check if WhatsApp service is healthy"""
-        if not self.is_configured:
-            return {"status": "not_configured", "error": "Twilio credentials not set"}
+    # =========================================================================
+    # HELPERS
+    # =========================================================================
+    
+    def _format_number(self, phone: str) -> str:
+        """Format phone number for WhatsApp"""
+        # Remove any whatsapp: prefix
+        phone = phone.replace("whatsapp:", "")
         
-        try:
-            # Fetch account info to verify credentials
-            account = await asyncio.to_thread(
-                lambda: self.client.api.accounts(settings.twilio_account_sid).fetch()
-            )
-            return {
-                "status": "healthy",
-                "account_status": account.status,
-                "from_number": self.from_number,
-            }
-        except Exception as e:
-            return {"status": "unhealthy", "error": str(e)}
+        # Remove spaces and dashes
+        phone = phone.replace(" ", "").replace("-", "")
+        
+        # Ensure + prefix
+        if not phone.startswith("+"):
+            if phone.startswith("91"):
+                phone = f"+{phone}"
+            else:
+                phone = f"+91{phone}"
+        
+        return phone
+    
+    def _render_template(self, template_name: str, params: Dict[str, str]) -> str:
+        """Render a message template"""
+        templates = {
+            "welcome": "Welcome to SiteMind, {name}! You've been added to {project}. Send any question to get started!",
+            "drawing_update": "New drawing uploaded: {drawing_name}. Please review and acknowledge.",
+            "task_assigned": "New task assigned: {task_name}. Due: {due_date}. Reply 'done' when complete.",
+            "red_flag": "⚠️ Alert: {title}\n\n{description}\n\nPlease investigate.",
+        }
+        
+        template = templates.get(template_name, template_name)
+        
+        for key, value in params.items():
+            template = template.replace(f"{{{key}}}", str(value))
+        
+        return template
+    
+    async def _check_rate_limit(self):
+        """Check and enforce rate limit"""
+        now = datetime.utcnow()
+        
+        # Reset counter every minute
+        if (now - self._last_reset).seconds >= 60:
+            self._message_count = 0
+            self._last_reset = now
+        
+        # Check limit
+        if self._message_count >= self._rate_limit:
+            wait_time = 60 - (now - self._last_reset).seconds
+            logger.warning(f"Rate limit reached, waiting {wait_time}s")
+            await asyncio.sleep(wait_time)
+            self._message_count = 0
+            self._last_reset = datetime.utcnow()
+        
+        self._message_count += 1
 
 
 # Singleton instance
 whatsapp_client = WhatsAppClient()
-
