@@ -30,6 +30,7 @@ from services.engagement_service import EngagementService, engagement_service
 
 # Business
 from services.roi_service import ROIService, roi_service
+from services.pricing_service import PricingService, pricing_service
 
 # Customer Management
 from services.config_service import ConfigService, config_service
@@ -78,6 +79,8 @@ __all__ = [
     # Business
     "ROIService",
     "roi_service",
+    "PricingService",
+    "pricing_service",
     
     # Customer Management
     "ConfigService",

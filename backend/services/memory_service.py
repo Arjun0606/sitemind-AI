@@ -2,11 +2,17 @@
 SiteMind Memory Service
 Long-term project memory using Supermemory.ai (with local fallback)
 
+SUPERMEMORY INTEGRATION:
+- API Docs: https://supermemory.ai/docs/introduction
+- Pro Plan ($19/mo): 3M tokens, 100K searches - good for start
+- Scale Plan ($399/mo): 80M tokens, 20M searches - when you grow
+
 FEATURES:
 - Store project knowledge (decisions, specs, queries)
 - Semantic search across all project data
 - Automatic context retrieval
 - Audit trail with citations
+- Per-project memory spaces
 """
 
 from typing import Optional, List, Dict, Any
@@ -22,11 +28,19 @@ class MemoryService:
     """
     Project memory management using Supermemory.ai
     Falls back to in-memory storage for development
+    
+    SUPERMEMORY CONCEPTS:
+    - Memories: Individual pieces of information
+    - Collections: Group memories (we use 1 collection per project)
+    - Search: Semantic search across memories
     """
     
     def __init__(self):
         self.api_key = settings.SUPERMEMORY_API_KEY
         self.base_url = "https://api.supermemory.ai/v1"
+        
+        # Track collections per project
+        self._collections: Dict[str, str] = {}  # project_id -> collection_id
         
         # In-memory fallback for development
         self._local_memory: Dict[str, List[Dict]] = {}
