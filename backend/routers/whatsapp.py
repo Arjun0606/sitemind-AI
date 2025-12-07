@@ -13,6 +13,7 @@ from services import (
     whatsapp_service,
     storage_service,
     billing_service,
+    wow_service,
 )
 from database import db
 from utils.logger import logger
@@ -70,6 +71,11 @@ async def whatsapp_webhook(request: Request):
             await whatsapp_service.send_message(phone, summary)
             return PlainTextResponse("OK")
         
+        if body_lower in ["roi", "week1", "report"]:
+            report = wow_service.format_week1_report(company_id, company_name)
+            await whatsapp_service.send_message(phone, report)
+            return PlainTextResponse("OK")
+        
         # Handle media
         if num_media > 0:
             await handle_media(phone, message, company_id, user["id"])
@@ -104,10 +110,14 @@ async def handle_query(
     
     # Get context from memory
     context = await memory_service.search(
-        project_id=company_id,  # Using company as project for now
+        project_id=company_id,
         query=question,
         limit=5,
     )
+    
+    # Track memory recall (WOW moment!)
+    if context:
+        wow_service.track_memory_recall(user_id, company_id)
     
     # Query Gemini
     response = await gemini_service.query(
@@ -116,6 +126,15 @@ async def handle_query(
     )
     
     answer = response.get("answer", "Sorry, I couldn't process that.")
+    
+    # Check for code references (WOW moment!)
+    has_code_ref = any(code in answer.lower() for code in ["is ", "is:", "nbc", "code"])
+    wow_service.track_query(user_id, company_id, had_code_reference=has_code_ref)
+    
+    # Add memory context to response (shows AI remembers)
+    if context:
+        recalled = [c.get("content", str(c))[:80] for c in context[:2]]
+        answer = wow_service.format_memory_response(answer, recalled)
     
     # Store Q&A in memory
     await memory_service.add_query(
@@ -174,8 +193,9 @@ async def handle_media(
             )
             
             if is_image:
-                # Track for billing
+                # Track for billing + WOW
                 billing_service.track_photo(company_id)
+                wow_service.track_photo(user_id, company_id)
                 
                 # Analyze image
                 analysis = await gemini_service.analyze_image(
