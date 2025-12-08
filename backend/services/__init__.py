@@ -28,6 +28,9 @@ from services.alert_service import alert_service
 from services.project_manager import project_manager
 from services.command_handler import command_handler
 
+# Subscription & Billing
+from services.subscription_reminder_service import subscription_reminder_service
+
 __all__ = [
     # Core AI
     "gemini_service",
@@ -53,4 +56,7 @@ __all__ = [
     # Project Management
     "project_manager",
     "command_handler",
+    
+    # Subscription & Billing
+    "subscription_reminder_service",
 ]

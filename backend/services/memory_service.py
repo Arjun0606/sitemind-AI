@@ -429,21 +429,37 @@ class MemoryService:
         company_id: str,
         project_id: str,
         query: str,
+        user_id: str = None,
         include_types: List[str] = None,
     ) -> List[Dict]:
         """
         Get relevant context for AI response
         
         Combines:
-        1. Semantic search for query
-        2. Recent decisions/changes
-        3. Relevant RFIs
+        1. Recent conversation history (for continuity)
+        2. Semantic search for query
+        3. Recent decisions/changes
         
         Returns context optimized for Gemini prompt injection
         """
         context = []
         
-        # 1. Main search
+        # 1. CONVERSATION HISTORY - Critical for continuity!
+        # "What's the cover?" → "40mm" → "And for beams?" needs this!
+        if user_id:
+            recent_conversation = await self.get_recent_conversation(
+                company_id=company_id,
+                user_id=user_id,
+                limit=5,  # Last 5 Q&A pairs
+            )
+            if recent_conversation:
+                context.append({
+                    "type": "conversation_history",
+                    "content": recent_conversation,
+                    "is_conversation": True,
+                })
+        
+        # 2. Semantic search for query
         results = await self.search(
             company_id=company_id,
             query=query,
@@ -453,7 +469,7 @@ class MemoryService:
         )
         context.extend(results)
         
-        # 2. Recent decisions (always relevant)
+        # 3. Recent decisions (always relevant)
         if not include_types or "decision" in include_types:
             decisions = await self.search(
                 company_id=company_id,
@@ -470,7 +486,51 @@ class MemoryService:
                     context.append(d)
         
         # Limit total context
-        return context[:7]
+        return context[:10]
+    
+    async def get_recent_conversation(
+        self,
+        company_id: str,
+        user_id: str,
+        limit: int = 5,
+    ) -> str:
+        """
+        Get recent conversation history for a user
+        
+        This enables continuity like:
+        User: "What's the cover for columns?"
+        AI: "40mm per IS 456"
+        User: "And for beams?"  ← This now works!
+        AI: "25mm for beams"
+        """
+        # Search for recent queries from this user
+        results = await self.search(
+            company_id=company_id,
+            query=f"user:{user_id}",  # Search by user
+            memory_types=["query"],
+            limit=limit,
+        )
+        
+        if not results:
+            # Fallback: search recent queries in company
+            results = await self.search(
+                company_id=company_id,
+                query="Q: A:",  # Search for Q&A format
+                memory_types=["query"],
+                limit=limit,
+            )
+        
+        if not results:
+            return ""
+        
+        # Format as conversation
+        conversation = []
+        for r in reversed(results):  # Oldest first
+            content = r.get("content", "")
+            if content:
+                conversation.append(content)
+        
+        return "\n---\n".join(conversation[-limit:])
     
     def format_context_for_prompt(self, context: List[Dict]) -> str:
         """Format context for Gemini prompt"""

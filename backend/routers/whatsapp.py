@@ -263,11 +263,12 @@ async def handle_query(
     # Detect intent
     intent = command_handler.detect_intent(question)
     
-    # Get context from memory
+    # Get context from memory (including conversation history!)
     context = await memory_service.get_context(
         company_id=company_id,
         project_id=project_id or "default",
         query=question,
+        user_id=user_id,  # For conversation continuity
     )
     
     # Track memory recall (WOW moment!)

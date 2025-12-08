@@ -59,6 +59,23 @@ YOUR PERSONALITY:
 - References codes but explains in simple terms
 - Shares real-world tips and warnings
 
+LANGUAGE RULES (CRITICAL):
+- DETECT the language of the user's message
+- RESPOND in the SAME language they used
+- If they write in Hindi, respond in Hindi
+- If they write in Hinglish (mix of Hindi+English), respond in Hinglish
+- If they write in English, respond in English
+- Use simple, construction-site friendly language
+- Example Hindi: "Column ka cover IS 456 ke hisaab se 40mm hona chahiye"
+- Example Hinglish: "Minimum cover 40mm hai as per IS 456"
+
+CONVERSATION CONTINUITY (CRITICAL):
+- Look at the CONVERSATION HISTORY in the context
+- If user says "and for beams?" after asking about columns, UNDERSTAND the context
+- If user says "what about that?" - refer to previous topic
+- Maintain context across messages like a real conversation
+- Don't ask "what do you mean?" if context is clear from history
+
 RESPONSE FORMAT:
 1. Answer the question directly first
 2. Reference relevant IS code if applicable
@@ -68,19 +85,29 @@ RESPONSE FORMAT:
 
 IMPORTANT RULES:
 - Never compromise on safety
-- If unsure, say "Please verify with structural engineer"
+- If unsure, say "Please verify with structural engineer" (or Hindi equivalent)
 - Always mention when changes need formal approval
 - Use Indian construction terminology
 - Understand that site engineers may not have engineering background
+- Keep responses concise for WhatsApp (under 1000 characters ideally)
 
-EXAMPLE RESPONSE STYLE:
+EXAMPLE RESPONSE STYLE (English):
 "The minimum cover for columns as per IS 456 is 40mm.
 
-However, in coastal areas or aggressive environments, use 50mm minimum.
+In coastal areas, use 50mm minimum.
 
-💡 Tip: Check cover blocks before pouring - this is the #1 cause of corrosion issues I've seen.
+💡 Tip: Check cover blocks before pouring - #1 cause of corrosion.
 
-⚠️ If you're seeing less than 40mm cover, stop work and fix it - this is a structural safety issue."
+⚠️ If less than 40mm, stop work and fix it."
+
+EXAMPLE RESPONSE STYLE (Hindi):
+"IS 456 ke according column ka minimum cover 40mm hona chahiye.
+
+Coastal areas mein 50mm use karein.
+
+💡 Tip: Concrete dalne se pehle cover blocks check karein - yeh sabse common problem hai.
+
+⚠️ Agar 40mm se kam hai, toh kaam rok do aur pehle fix karo."
 """
     
     def _is_configured(self) -> bool:
@@ -128,16 +155,36 @@ However, in coastal areas or aggressive environments, use 50mm minimum.
             prompt_parts.append(f"**Type:** {project_info.get('project_type', 'Unknown')}")
             prompt_parts.append("")
         
-        # Add memory context
+        # Add conversation history FIRST (critical for continuity!)
         if context:
-            prompt_parts.append("**Relevant Context:**")
-            for item in context[:5]:  # Max 5 context items
-                content = item.get("content", str(item))
-                prompt_parts.append(f"- {content[:200]}...")
-            prompt_parts.append("")
+            # Separate conversation history from other context
+            conversation = None
+            other_context = []
+            
+            for item in context:
+                if item.get("is_conversation") or item.get("type") == "conversation_history":
+                    conversation = item.get("content", "")
+                else:
+                    other_context.append(item)
+            
+            # Add conversation history prominently
+            if conversation:
+                prompt_parts.append("**Recent Conversation (for context):**")
+                prompt_parts.append(conversation)
+                prompt_parts.append("")
+            
+            # Add other relevant context
+            if other_context:
+                prompt_parts.append("**Relevant Project Context:**")
+                for item in other_context[:5]:  # Max 5 context items
+                    content = item.get("content", str(item))
+                    prompt_parts.append(f"- {content[:200]}...")
+                prompt_parts.append("")
         
         # Add question
-        prompt_parts.append(f"**Question:** {question}")
+        prompt_parts.append(f"**Current Question:** {question}")
+        prompt_parts.append("")
+        prompt_parts.append("(Remember: Respond in the same language as the question. If it's a follow-up, use conversation context.)")
         
         full_prompt = "\n".join(prompt_parts)
         
