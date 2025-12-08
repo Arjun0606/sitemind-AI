@@ -23,6 +23,8 @@ from services import (
     project_manager,
     command_handler,
     alert_service,
+    leakage_prevention_service,
+    office_sync_service,
 )
 from database import db
 from utils.logger import logger
@@ -260,6 +262,22 @@ async def handle_query(
     # Track for daily brief
     daily_brief_service.track_query(project_id or company_id)
     
+    # Track for office sync
+    office_sync_service.track_query(
+        project_id=project_id or "default",
+        company_id=company_id,
+        question=question,
+        user_id=user_id,
+    )
+    
+    # LEAKAGE PREVENTION: Analyze every message!
+    leakage_analysis = await leakage_prevention_service.analyze_message(
+        message=question,
+        company_id=company_id,
+        project_id=project_id or "default",
+        user_id=user_id,
+    )
+    
     # Detect intent
     intent = command_handler.detect_intent(question)
     
@@ -319,6 +337,28 @@ async def handle_query(
     # Add project indicator
     if project_name:
         answer += f"\n🏗️ _{project_name}_"
+    
+    # LEAKAGE PREVENTION: Add warnings if detected
+    if leakage_analysis.get("recommendations"):
+        answer += "\n\n━━━━━━━━━━━━━━━"
+        for rec in leakage_analysis["recommendations"]:
+            answer += f"\n{rec}"
+    
+    # If change order detected, track it
+    if leakage_analysis.get("change_order"):
+        office_sync_service.track_change_order(
+            project_id=project_id or "default",
+            company_id=company_id,
+            description=question[:100],
+        )
+    
+    # If billable work detected, track it
+    if leakage_analysis.get("billable_work"):
+        office_sync_service.track_billable(
+            project_id=project_id or "default",
+            company_id=company_id,
+            description=question[:100],
+        )
     
     # Store Q&A in memory
     await memory_service.add_query(
