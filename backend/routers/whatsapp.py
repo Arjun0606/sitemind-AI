@@ -28,6 +28,7 @@ from services import (
     office_sync_service,
     sitemind_core,
     document_ingestion_service,
+    watchdog_service,
 )
 from database import db
 from utils.logger import logger
@@ -177,25 +178,17 @@ async def handle_command(
     if cmd in ["roi", "_cmd_roi"]:
         return wow_service.format_week1_report(company_id, company_name)
     
-    # Report
-    if cmd in ["report", "week", "_cmd_report"]:
-        usage = billing_service.get_usage(company_id) or {}
-        roi = wow_service.get_week1_roi(company_id)
-        
-        report = report_service.generate_weekly_report(
+    # Report - Leakage Prevention Report (THE KEY REPORT)
+    if cmd in ["report", "week", "leakage", "_cmd_report"]:
+        report = watchdog_service.generate_weekly_report(
             company_id=company_id,
             company_name=company_name,
-            activity_data={
-                "queries": usage.get("queries", 0),
-                "photos": usage.get("photos", 0),
-                "documents": usage.get("documents", 0),
-                "safety_flags": roi.get("safety_flags", 0),
-                "conflicts": 0,
-                "active_users": roi.get("active_users", 0),
-                "active_projects": len(project_manager.get_active_projects(company_id)),
-            },
         )
-        return report_service.format_weekly_whatsapp(report)
+        return watchdog_service.format_weekly_report(report)
+    
+    # Open items
+    if cmd in ["open", "pending", "items", "_cmd_open"]:
+        return watchdog_service.format_open_items_summary(company_id)
     
     # Brief
     if cmd in ["brief", "_cmd_brief"]:
@@ -258,13 +251,11 @@ async def handle_query(
     project_name: str,
 ):
     """
-    Handle text query - THE CORE AI EXPERIENCE
+    Handle text query - THE COMPLETE EXPERIENCE
     
-    Uses sitemind_core which:
-    1. Stores the message (info dump)
-    2. Retrieves ALL relevant context
-    3. Generates response with CITATIONS
-    4. Stores the conversation
+    1. Watchdog analyzes for leakages (change orders, decisions, issues)
+    2. SiteMind Core provides AI response with citations
+    3. Everything is tracked and logged
     """
     
     # Track for billing
@@ -275,8 +266,20 @@ async def handle_query(
     user = await db.get_user_by_phone(phone)
     user_name = user.get("name", "") if user else ""
     
-    # USE SITEMIND CORE - This is the magic!
-    # It handles: context retrieval, AI response, citations, storage
+    # =========================================================================
+    # WATCHDOG - Analyze for leakages FIRST
+    # =========================================================================
+    watchdog_result = watchdog_service.analyze_message(
+        message=question,
+        company_id=company_id,
+        project_id=project_id or "default",
+        user_id=user_id,
+        user_name=user_name,
+    )
+    
+    # =========================================================================
+    # SITEMIND CORE - AI response with citations
+    # =========================================================================
     result = await sitemind_core.process_message(
         message=question,
         company_id=company_id,
@@ -287,6 +290,13 @@ async def handle_query(
     
     answer = result.get("answer", "Sorry, I couldn't process that.")
     context_used = result.get("context_used", 0)
+    
+    # =========================================================================
+    # ADD WATCHDOG DETECTIONS TO RESPONSE
+    # =========================================================================
+    if watchdog_result.get("response_additions"):
+        for addition in watchdog_result["response_additions"]:
+            answer += f"\n{addition}"
     
     # Track memory recall (WOW moment!)
     if context_used > 0:
@@ -308,7 +318,7 @@ async def handle_query(
     if project_name and project_name != "Default":
         answer += f"\n\n🏗️ _{project_name}_"
     
-    # Log to database (sitemind_core already stores in Supermemory)
+    # Log to database
     await db.log_query(
         company_id=company_id,
         project_id=project_id,

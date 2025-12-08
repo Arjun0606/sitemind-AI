@@ -31,9 +31,10 @@ from services.command_handler import command_handler
 # Subscription & Billing
 from services.subscription_reminder_service import subscription_reminder_service
 
-# THE SIMPLE CORE - This is all you need
+# THE FINAL PRODUCT - Everything you need
 from services.sitemind_core import sitemind_core
 from services.document_ingestion_service import document_ingestion_service
+from services.watchdog_service import watchdog_service
 
 # Legacy services (kept for backwards compatibility)
 from services.leakage_prevention_service import leakage_prevention_service
@@ -70,9 +71,10 @@ __all__ = [
     # Subscription & Billing
     "subscription_reminder_service",
     
-    # THE SIMPLE CORE
+    # THE FINAL PRODUCT
     "sitemind_core",
     "document_ingestion_service",
+    "watchdog_service",
     
     # Legacy services
     "leakage_prevention_service",
