@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     # ==========================================================================
     # GOOGLE GEMINI (AI)
     # ==========================================================================
-    # Get from: https://makersuite.google.com/app/apikey
+    # Get from: https://aistudio.google.com/app/apikey
     GOOGLE_API_KEY: str = "your_google_api_key"
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-3-pro"  # Most intelligent model - best for construction
     
     # ==========================================================================
     # SUPERMEMORY (Long-term memory)
@@ -60,13 +60,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     
     # ==========================================================================
-    # PRICING (per company, unlimited projects)
+    # PRICING (per company, unlimited projects) - 90% margins
     # ==========================================================================
     FLAT_FEE_USD: float = 1000.0
-    QUERY_PRICE_USD: float = 0.20      # 90% margin
-    DOCUMENT_PRICE_USD: float = 4.00   # 90% margin
-    PHOTO_PRICE_USD: float = 0.80      # 90% margin
-    STORAGE_PRICE_USD: float = 0.25    # 92% margin
+    QUERY_PRICE_USD: float = 0.25       # Cost $0.023, 91% margin
+    DOCUMENT_PRICE_USD: float = 0.45    # Cost $0.043, 90% margin
+    PHOTO_PRICE_USD: float = 0.15       # Cost $0.015, 90% margin
+    STORAGE_PRICE_USD: float = 2.00     # Cost $0.111, 94% margin
     
     # ==========================================================================
     # INCLUDED LIMITS (per company)
@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     INCLUDED_QUERIES: int = 1000
     INCLUDED_DOCUMENTS: int = 50
     INCLUDED_PHOTOS: int = 200
-    INCLUDED_STORAGE_GB: int = 25
+    INCLUDED_STORAGE_GB: int = 50
     
     class Config:
         env_file = ".env"

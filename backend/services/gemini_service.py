@@ -21,12 +21,23 @@ from utils.logger import logger
 class GeminiService:
     """
     Google Gemini API wrapper for construction AI
+    
+    Using Gemini 3 Pro - Google's most intelligent model
+    https://ai.google.dev/gemini-api/docs
     """
     
     def __init__(self):
         self.api_key = settings.GOOGLE_API_KEY
         self.model = settings.GEMINI_MODEL
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+        
+        # Fallback models in order of preference
+        self.fallback_models = [
+            "gemini-3-pro",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+        ]
         
         # System prompt for construction context
         self.system_prompt = """You are SiteMind, a senior construction expert with 20+ years of experience in Indian construction.
@@ -151,8 +162,7 @@ However, in coastal areas or aggressive environments, use 50mm minimum.
         image_data: bytes = None,
         mime_type: str = None,
     ) -> str:
-        """Generate content from Gemini"""
-        url = f"{self.base_url}/models/{self.model}:generateContent?key={self.api_key}"
+        """Generate content from Gemini with automatic fallback"""
         
         # Build content parts
         parts = []
@@ -180,21 +190,45 @@ However, in coastal areas or aggressive environments, use 50mm minimum.
             },
         }
         
+        # Try models in order of preference
+        models_to_try = [self.model] + [m for m in self.fallback_models if m != self.model]
+        last_error = None
+        
         async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=60.0)
-            
-            if response.status_code == 200:
-                data = response.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    content = candidates[0].get("content", {})
-                    parts = content.get("parts", [])
-                    if parts:
-                        return parts[0].get("text", "")
-                return "No response generated"
-            else:
-                error = response.json().get("error", {})
-                raise Exception(error.get("message", f"API error: {response.status_code}"))
+            for model in models_to_try:
+                url = f"{self.base_url}/models/{model}:generateContent?key={self.api_key}"
+                
+                try:
+                    response = await client.post(url, json=payload, timeout=60.0)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            content = candidates[0].get("content", {})
+                            resp_parts = content.get("parts", [])
+                            if resp_parts:
+                                # Update active model on success
+                                if model != self.model:
+                                    logger.info(f"🔄 Using fallback model: {model}")
+                                    self.model = model
+                                return resp_parts[0].get("text", "")
+                        return "No response generated"
+                    elif response.status_code == 404:
+                        # Model not found, try next
+                        logger.warning(f"Model {model} not available, trying next...")
+                        continue
+                    else:
+                        error = response.json().get("error", {})
+                        last_error = error.get("message", f"API error: {response.status_code}")
+                        # Try next model
+                        continue
+                        
+                except Exception as e:
+                    last_error = str(e)
+                    continue
+        
+        raise Exception(last_error or "All models failed")
     
     # =========================================================================
     # IMAGE ANALYSIS
