@@ -93,10 +93,15 @@ class PricingService:
             "photo": 0.01 + 0.005 + 0.0001,  # = $0.0151
             
             # ----- STORAGE (per GB/month) -----
-            # Supabase storage: $0.021/GB
-            # Bandwidth (2x reads): $0.18/GB
-            # TOTAL: $0.201
-            "storage_gb": 0.021 + 0.18,  # = $0.201
+            # From supabase.com/pricing:
+            # - File storage: $0.021/GB (beyond 100 GB included)
+            # - Egress: $0.09/GB (beyond 250 GB included)
+            # Assuming 2x reads per storage = $0.18 egress per GB stored
+            # TOTAL: $0.021 + $0.18 = $0.201
+            # BUT at scale with many customers, we exceed included limits fast
+            # Worst case: $0.021 storage + $0.09 egress (per read, not 2x)
+            # Conservative: $0.111/GB (storage + 1x egress)
+            "storage_gb": 0.021 + 0.09,  # = $0.111 (conservative)
             
             # ----- WHATSAPP (already included in query) -----
             "whatsapp_message": 0.005,
