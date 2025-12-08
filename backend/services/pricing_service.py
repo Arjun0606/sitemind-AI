@@ -1,33 +1,25 @@
 """
 SiteMind Pricing Service
-ONE subscription per company. Unlimited projects.
-
-CURSOR-STYLE PRICING:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-$1,000/month per COMPANY
-
-Includes:
-• Unlimited projects
-• Unlimited users
-• 1,000 queries/month
-• 50 documents/month
-• 200 photos/month
-• 25 GB storage
-
-Usage overage (billed next cycle):
-• Query:    $0.10/query
-• Document: $2.00/document
-• Photo:    $0.40/photo
-• Storage:  $0.50/GB
+$1,000/company + usage-based billing with 90% margins
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COST STRUCTURE (Our actual costs)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-WHY THIS WORKS:
-- Big company (10 projects): $1000 is nothing
-- Small company (1 project): Still worth it
-- Heavy usage: They pay more (fair)
-- Simple billing: One invoice per company
+SUPERMEMORY.AI ($19/month Pro plan):
+- 3M tokens included
+- 100K searches included
+- Overage: $0.01/1K tokens = $10/M tokens
+- Overage: $0.10/1K queries = $100/M queries
+
+GEMINI 3 PRO:
+- Input: $2/million tokens
+- Output: $12/million tokens
+- Average ~$7/M blended (60% input, 40% output)
+
+SUPABASE:
+- Storage: ~$0.021/GB/month
+- Bandwidth: ~$0.09/GB
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
@@ -38,57 +30,79 @@ from datetime import datetime, timedelta
 
 class PricingService:
     """
-    Simple pricing: $1000/company + usage
+    Cursor-style pricing: Flat fee + usage overages at 90% margin
     """
     
     def __init__(self):
         # =================================================================
-        # THE ONE PLAN - PER COMPANY
+        # FLAT FEE - PER COMPANY
         # =================================================================
         
         self.FLAT_FEE_USD = 1000  # $1000/month per company
         
         # What's included in the flat fee
         self.INCLUDED = {
-            "projects": "unlimited",   # No limit on projects!
-            "users": "unlimited",      # No limit on users!
-            "queries": 1000,           # 1000 queries/month
-            "documents": 50,           # 50 documents/month
-            "photos": 200,             # 200 photos/month
-            "storage_gb": 25,          # 25 GB storage
+            "projects": "unlimited",
+            "users": "unlimited",
+            "queries": 1000,          # AI queries/month
+            "documents": 50,          # Document uploads/month
+            "photos": 200,            # Photo analyses/month
+            "storage_gb": 25,         # Storage
+            "memory_searches": 5000,  # Supermemory searches
         }
         
         # =================================================================
-        # USAGE PRICING (90% margins - this is where we make money)
+        # OUR COSTS (what we actually pay)
         # =================================================================
         
-        # Our costs
         self.COSTS = {
-            "query": 0.02,       # Gemini API (bulk)
-            "document": 0.40,    # Gemini Vision
-            "photo": 0.08,       # Gemini Vision
-            "storage_gb": 0.02,  # Supabase
+            # Gemini 3 Pro costs
+            "query": 0.015,           # ~$15/1000 queries (avg tokens per query)
+            
+            # Per document (Gemini vision for PDF + Supermemory storage)
+            "document": 0.05,         # ~$50/1000 docs
+            
+            # Per photo (Gemini vision analysis)
+            "photo": 0.02,            # ~$20/1000 photos
+            
+            # Storage (Supabase)
+            "storage_gb": 0.021,      # ~$0.02/GB/month
+            
+            # Supermemory (beyond included)
+            "memory_token": 0.00001,  # $0.01/1K = $0.00001/token
+            "memory_search": 0.0001,  # $0.10/1K = $0.0001/search
         }
         
-        # Our prices (90% margin = cost × 10)
+        # =================================================================
+        # OUR PRICES (10x cost = 90% margin)
+        # =================================================================
+        
         self.USAGE_PRICES = {
-            "query": 0.20,       # $0.20/query (90% margin)
-            "document": 4.00,    # $4.00/document (90% margin)
-            "photo": 0.80,       # $0.80/photo (90% margin)
-            "storage_gb": 0.25,  # $0.25/GB (92% margin)
+            # Query overage: Cost $0.015 → Price $0.15 (90% margin)
+            "query": 0.15,
+            
+            # Document overage: Cost $0.05 → Price $0.50 (90% margin)
+            "document": 0.50,
+            
+            # Photo overage: Cost $0.02 → Price $0.20 (90% margin)
+            "photo": 0.20,
+            
+            # Storage overage: Cost $0.021 → Price $0.25 (92% margin)
+            "storage_gb": 0.25,
+            
+            # Memory search overage: Cost $0.0001 → Price $0.001 (90% margin)
+            "memory_search": 0.001,
         }
         
         # =================================================================
         # DISCOUNTS
         # =================================================================
         
-        self.ANNUAL_DISCOUNT = 0.17      # 2 months free (pay 10, get 12)
-        self.FOUNDING_DISCOUNT = 0.25    # 25% off for first 10 customers
+        self.ANNUAL_DISCOUNT = 0.17      # 2 months free
+        self.FOUNDING_DISCOUNT = 0.25    # First 10 customers
+        self.PILOT_DISCOUNT = 1.0        # 100% off for pilots
         
-        # =================================================================
-        # CONVERSION
-        # =================================================================
-        
+        # Currency
         self.USD_TO_INR = 83
     
     # =========================================================================
@@ -122,13 +136,14 @@ ONE subscription. ALL your projects.
 
 ✓ **Unlimited projects** - 1 or 100, same price
 ✓ **Unlimited users** - Add your whole team
-✓ {self.INCLUDED['queries']:,} queries/month
+✓ {self.INCLUDED['queries']:,} AI queries/month
 ✓ {self.INCLUDED['documents']} documents/month
-✓ {self.INCLUDED['photos']} photos/month
+✓ {self.INCLUDED['photos']} photo analyses/month
 ✓ {self.INCLUDED['storage_gb']} GB storage
 ✓ WhatsApp access 24/7
 ✓ Complete audit trail
-✓ Personal onboarding
+✓ IS code database
+✓ Safety detection
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -149,17 +164,56 @@ _Tracked during month, billed next cycle_
 """
     
     # =========================================================================
-    # USAGE CALCULATION
+    # COST CALCULATION
     # =========================================================================
     
-    def calculate_usage(
+    def calculate_our_cost(
+        self,
+        queries: int,
+        documents: int,
+        photos: int,
+        storage_gb: float,
+        memory_searches: int = 0,
+    ) -> Dict[str, Any]:
+        """Calculate what WE pay for this usage"""
+        
+        # Supermemory base cost (Pro plan)
+        supermemory_base = 19.0  # $19/month
+        
+        # Gemini costs
+        gemini_cost = (
+            queries * self.COSTS["query"] +
+            documents * self.COSTS["document"] +
+            photos * self.COSTS["photo"]
+        )
+        
+        # Storage cost (Supabase)
+        storage_cost = storage_gb * self.COSTS["storage_gb"]
+        
+        # Memory overage (beyond Pro plan included)
+        memory_overage_cost = 0
+        if memory_searches > 100000:  # Pro plan includes 100K
+            excess = memory_searches - 100000
+            memory_overage_cost = excess * self.COSTS["memory_search"]
+        
+        total = supermemory_base + gemini_cost + storage_cost + memory_overage_cost
+        
+        return {
+            "supermemory_base": supermemory_base,
+            "gemini": round(gemini_cost, 2),
+            "storage": round(storage_cost, 2),
+            "memory_overage": round(memory_overage_cost, 2),
+            "total": round(total, 2),
+        }
+    
+    def calculate_usage_charges(
         self,
         queries: int,
         documents: int,
         photos: int,
         storage_gb: float,
     ) -> Dict[str, Any]:
-        """Calculate usage charges (overages only)"""
+        """Calculate usage charges for customer (overages only)"""
         
         breakdown = {
             "queries": {
@@ -201,6 +255,167 @@ _Tracked during month, billed next cycle_
         }
     
     # =========================================================================
+    # MARGIN VERIFICATION
+    # =========================================================================
+    
+    def verify_margins(self) -> Dict[str, Any]:
+        """Verify we maintain 90%+ margins on all usage"""
+        results = {}
+        
+        items = [
+            ("query", "Query"),
+            ("document", "Document"),
+            ("photo", "Photo"),
+            ("storage_gb", "Storage"),
+        ]
+        
+        for key, label in items:
+            cost = self.COSTS.get(key, 0)
+            price = self.USAGE_PRICES.get(key, 0)
+            
+            if price > 0:
+                margin = ((price - cost) / price) * 100
+            else:
+                margin = 0
+            
+            results[key] = {
+                "label": label,
+                "cost": f"${cost:.4f}",
+                "price": f"${price:.2f}",
+                "margin": f"{margin:.0f}%",
+                "status": "✅" if margin >= 85 else "⚠️" if margin >= 70 else "❌",
+            }
+        
+        return results
+    
+    def print_margin_report(self) -> str:
+        """Print margin report"""
+        margins = self.verify_margins()
+        
+        lines = [
+            "",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "             MARGIN VERIFICATION REPORT",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "",
+            f"{'Item':<12} {'Our Cost':<12} {'Our Price':<12} {'Margin':<10} {'Status'}",
+            "─" * 55,
+        ]
+        
+        for key, data in margins.items():
+            lines.append(
+                f"{data['label']:<12} {data['cost']:<12} {data['price']:<12} {data['margin']:<10} {data['status']}"
+            )
+        
+        lines.extend([
+            "",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "",
+        ])
+        
+        return "\n".join(lines)
+    
+    # =========================================================================
+    # URBANRISE SIMULATION
+    # =========================================================================
+    
+    def simulate_urbanrise_month(self) -> Dict[str, Any]:
+        """
+        Simulate Urbanrise usage to verify profitability
+        
+        Assumptions:
+        - 30 active projects
+        - 500 users
+        - Heavy usage
+        """
+        # Expected usage for a whale like Urbanrise
+        queries = 8000        # 8K queries (heavy usage)
+        documents = 150       # 150 documents
+        photos = 600          # 600 photos
+        storage_gb = 40       # 40 GB
+        memory_searches = 200000  # Heavy memory usage
+        
+        # Our costs
+        our_cost = self.calculate_our_cost(
+            queries, documents, photos, storage_gb, memory_searches
+        )
+        
+        # Customer charges
+        customer_charges = self.calculate_usage_charges(
+            queries, documents, photos, storage_gb
+        )
+        
+        # Total revenue
+        revenue = self.FLAT_FEE_USD + customer_charges["total_usd"]
+        
+        # Profit
+        profit = revenue - our_cost["total"]
+        margin = (profit / revenue) * 100 if revenue > 0 else 0
+        
+        return {
+            "company": "Urbanrise (Simulated)",
+            "usage": {
+                "queries": queries,
+                "documents": documents,
+                "photos": photos,
+                "storage_gb": storage_gb,
+            },
+            "our_cost": our_cost,
+            "flat_fee": self.FLAT_FEE_USD,
+            "usage_charges": customer_charges["total_usd"],
+            "total_revenue": round(revenue, 2),
+            "profit": round(profit, 2),
+            "margin": f"{margin:.0f}%",
+        }
+    
+    def print_urbanrise_simulation(self) -> str:
+        """Print Urbanrise simulation"""
+        sim = self.simulate_urbanrise_month()
+        
+        return f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+         URBANRISE MONTHLY SIMULATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USAGE (30 projects, 500 users):
+• Queries:     {sim['usage']['queries']:,}
+• Documents:   {sim['usage']['documents']}
+• Photos:      {sim['usage']['photos']}
+• Storage:     {sim['usage']['storage_gb']} GB
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OUR COSTS:
+• Supermemory:  ${sim['our_cost']['supermemory_base']:.2f}
+• Gemini API:   ${sim['our_cost']['gemini']:.2f}
+• Storage:      ${sim['our_cost']['storage']:.2f}
+• Memory extra: ${sim['our_cost']['memory_overage']:.2f}
+─────────────────────────────────
+• TOTAL COST:   ${sim['our_cost']['total']:.2f}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+REVENUE:
+• Flat Fee:     ${sim['flat_fee']:,.2f}
+• Usage:        ${sim['usage_charges']:.2f}
+─────────────────────────────────
+• TOTAL:        ${sim['total_revenue']:,.2f}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROFIT:         ${sim['profit']:,.2f}
+MARGIN:         {sim['margin']}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ANNUAL PROJECTION:
+• Revenue:      ${sim['total_revenue'] * 12:,.0f}/year
+• Profit:       ${sim['profit'] * 12:,.0f}/year
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+    
+    # =========================================================================
     # INVOICE GENERATION
     # =========================================================================
     
@@ -210,14 +425,27 @@ _Tracked during month, billed next cycle_
         previous_usage: Dict = None,
         is_founding: bool = False,
         is_annual: bool = False,
+        is_pilot: bool = False,
     ) -> Dict[str, Any]:
-        """
-        Generate invoice:
-        - Flat fee for THIS cycle
-        - Usage from PREVIOUS cycle
-        """
+        """Generate invoice"""
         
-        # Flat fee
+        # Pilot = free
+        if is_pilot:
+            return {
+                "invoice_id": f"INV-PILOT-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+                "company": company_name,
+                "date": datetime.utcnow().strftime("%Y-%m-%d"),
+                "period": "Pilot",
+                "flat_fee_usd": 0,
+                "discount_type": "pilot",
+                "discount_amount": self.FLAT_FEE_USD,
+                "usage": None,
+                "total_usd": 0,
+                "total_inr": 0,
+                "note": "Pilot program - first 3 months free",
+            }
+        
+        # Calculate flat fee
         if is_annual:
             flat_fee = self.FLAT_FEE_USD * 12 * (1 - self.ANNUAL_DISCOUNT)
             period = "Annual"
@@ -227,16 +455,20 @@ _Tracked during month, billed next cycle_
         
         # Founding discount
         founding_discount = 0
+        discount_type = None
         if is_founding:
             founding_discount = flat_fee * self.FOUNDING_DISCOUNT
             flat_fee = flat_fee - founding_discount
+            discount_type = "founding"
+        elif is_annual:
+            discount_type = "annual"
         
-        # Usage from previous cycle
+        # Usage charges from previous cycle
         usage_charges = None
         usage_total = 0
         
         if previous_usage:
-            usage_charges = self.calculate_usage(
+            usage_charges = self.calculate_usage_charges(
                 queries=previous_usage.get("queries", 0),
                 documents=previous_usage.get("documents", 0),
                 photos=previous_usage.get("photos", 0),
@@ -252,21 +484,44 @@ _Tracked during month, billed next cycle_
             "date": datetime.utcnow().strftime("%Y-%m-%d"),
             "due_date": (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%d"),
             "period": period,
-            
             "flat_fee_usd": self.FLAT_FEE_USD if not is_annual else self.FLAT_FEE_USD * 12,
-            "discount_type": "founding" if is_founding else ("annual" if is_annual else None),
-            "discount_amount": founding_discount if is_founding else (self.FLAT_FEE_USD * 12 * self.ANNUAL_DISCOUNT if is_annual else 0),
+            "discount_type": discount_type,
+            "discount_amount": founding_discount if is_founding else (
+                self.FLAT_FEE_USD * 12 * self.ANNUAL_DISCOUNT if is_annual else 0
+            ),
             "net_flat_fee_usd": flat_fee,
-            
             "usage": usage_charges,
             "usage_total_usd": usage_total,
-            
             "total_usd": round(total, 2),
             "total_inr": round(total * self.USD_TO_INR, 2),
         }
     
     def format_invoice(self, invoice: Dict) -> str:
         """Format invoice for display"""
+        
+        if invoice.get("note") and "Pilot" in invoice.get("period", ""):
+            return f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    SITEMIND INVOICE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Invoice:  {invoice['invoice_id']}
+Company:  {invoice['company']}
+Date:     {invoice['date']}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎉 PILOT PROGRAM
+
+{invoice['note']}
+
+SiteMind Enterprise                      $1,000.00
+Pilot Discount (100%)                   -$1,000.00
+                                         ─────────
+TOTAL DUE                                    $0.00
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
         
         msg = f"""
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -305,7 +560,7 @@ Annual Discount (-17%)                  -${invoice['discount_amount']:,.2f}"""
 Subscription Total                       ${invoice['net_flat_fee_usd']:,.2f}"""
 
         usage = invoice.get('usage')
-        if usage and usage['total_usd'] > 0:
+        if usage and usage.get('total_usd', 0) > 0:
             msg += f"""
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -334,26 +589,13 @@ TOTAL DUE                                ${invoice['total_usd']:>8.2f}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
         return msg
-    
-    # =========================================================================
-    # MARGIN VERIFICATION
-    # =========================================================================
-    
-    def verify_margins(self) -> Dict[str, Any]:
-        """Verify 80%+ margins on usage"""
-        results = {}
-        for item in ["query", "document", "photo", "storage_gb"]:
-            cost = self.COSTS[item]
-            price = self.USAGE_PRICES[item]
-            margin = ((price - cost) / price) * 100
-            results[item] = {
-                "cost": f"${cost}",
-                "price": f"${price}",
-                "margin": f"{margin:.0f}%",
-                "ok": "✅" if margin >= 80 else "❌",
-            }
-        return results
 
 
 # Singleton instance
 pricing_service = PricingService()
+
+
+# Quick test
+if __name__ == "__main__":
+    print(pricing_service.print_margin_report())
+    print(pricing_service.print_urbanrise_simulation())
