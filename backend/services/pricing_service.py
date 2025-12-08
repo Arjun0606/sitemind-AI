@@ -3,24 +3,31 @@ SiteMind Pricing Service
 $1,000/company + usage-based billing with 90% margins
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-COST STRUCTURE (Our actual costs)
+COST STRUCTURE - ALL SERVICES WITH OVERAGES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-SUPERMEMORY.AI ($19/month Pro plan):
-- 3M tokens included
-- 100K searches included
-- Overage: $0.01/1K tokens = $10/M tokens
-- Overage: $0.10/1K queries = $100/M queries
+1. SUPERMEMORY.AI ($19/month Pro plan):
+   - Included: 3M tokens, 100K searches
+   - Token overage: $0.01/1K tokens = $10/M tokens
+   - Search overage: $0.10/1K queries
 
-GEMINI 3 PRO:
-- Input: $2/million tokens
-- Output: $12/million tokens
-- Average ~$7/M blended (60% input, 40% output)
+2. GEMINI 3 PRO:
+   - Input: $2/million tokens
+   - Output: $12/million tokens
+   - Per query (~1K input, 500 output): ~$0.008
 
-SUPABASE:
-- Storage: ~$0.021/GB/month
-- Bandwidth: ~$0.09/GB
+3. SUPABASE:
+   - Pro plan: $25/month
+   - Storage: $0.021/GB/month
+   - Bandwidth: $0.09/GB
+   - Database egress: included in pro
 
+4. TWILIO (WhatsApp):
+   - WhatsApp message: $0.005/message sent
+   - Incoming: Free
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PRICING FORMULA: Our Price = Our Cost × 10 (90% margin)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -30,7 +37,7 @@ from datetime import datetime, timedelta
 
 class PricingService:
     """
-    Cursor-style pricing: Flat fee + usage overages at 90% margin
+    Pricing with 90% margins on ALL costs including overages
     """
     
     def __init__(self):
@@ -47,51 +54,75 @@ class PricingService:
             "queries": 1000,          # AI queries/month
             "documents": 50,          # Document uploads/month
             "photos": 200,            # Photo analyses/month
-            "storage_gb": 25,         # Storage
-            "memory_searches": 5000,  # Supermemory searches
+            "storage_gb": 50,         # 50 GB included (generous!)
         }
         
         # =================================================================
-        # OUR COSTS (what we actually pay)
+        # OUR ACTUAL COSTS (PER UNIT) - INCLUDING ALL OVERAGES
         # =================================================================
         
         self.COSTS = {
-            # Gemini 3 Pro costs
-            "query": 0.015,           # ~$15/1000 queries (avg tokens per query)
+            # ----- PER QUERY -----
+            # Gemini 3 Pro: ~1K input tokens ($0.002) + ~500 output tokens ($0.006) = $0.008
+            # Supermemory search: 1 search = $0.0001 (overage rate)
+            # Supermemory token for context: ~500 tokens = $0.000005
+            # Total per query:
+            "query": 0.008 + 0.0001 + 0.000005,  # = $0.008105 ≈ $0.0082
             
-            # Per document (Gemini vision for PDF + Supermemory storage)
-            "document": 0.05,         # ~$50/1000 docs
+            # ----- PER DOCUMENT -----
+            # Gemini Vision for PDF: ~5K tokens = $0.035
+            # Supermemory storage: ~2K tokens = $0.00002
+            # Supabase storage: ~1MB = $0.000021
+            # Total per document:
+            "document": 0.035 + 0.00002 + 0.000021,  # = $0.035 ≈ $0.035
             
-            # Per photo (Gemini vision analysis)
-            "photo": 0.02,            # ~$20/1000 photos
+            # ----- PER PHOTO -----
+            # Gemini Vision: ~2K tokens = $0.016
+            # Supermemory storage: ~500 tokens = $0.000005
+            # Supabase storage: ~2MB = $0.000042
+            # Total per photo:
+            "photo": 0.016 + 0.000005 + 0.000042,  # = $0.016 ≈ $0.016
             
-            # Storage (Supabase)
-            "storage_gb": 0.021,      # ~$0.02/GB/month
+            # ----- STORAGE (per GB/month) -----
+            # Supabase: $0.021/GB
+            # Bandwidth (assuming 2x reads): $0.18/GB
+            # Total per GB:
+            "storage_gb": 0.021 + 0.18,  # = $0.20 ≈ $0.20
             
-            # Supermemory (beyond included)
-            "memory_token": 0.00001,  # $0.01/1K = $0.00001/token
-            "memory_search": 0.0001,  # $0.10/1K = $0.0001/search
+            # ----- WHATSAPP MESSAGES -----
+            # Twilio: $0.005/message (we send ~2 messages per query)
+            "whatsapp_message": 0.005,
         }
         
         # =================================================================
-        # OUR PRICES (10x cost = 90% margin)
+        # FIXED MONTHLY COSTS (OUR BASE)
+        # =================================================================
+        
+        self.FIXED_COSTS = {
+            "supermemory_pro": 19.0,    # $19/month
+            "supabase_pro": 25.0,        # $25/month
+            "railway_hosting": 20.0,     # ~$20/month
+            "twilio_number": 15.0,       # ~$15/month for WhatsApp number
+        }
+        
+        self.TOTAL_FIXED_COST = sum(self.FIXED_COSTS.values())  # = $79/month
+        
+        # =================================================================
+        # OUR PRICES (Cost × 10 = 90% margin)
         # =================================================================
         
         self.USAGE_PRICES = {
-            # Query overage: Cost $0.015 → Price $0.15 (90% margin)
-            "query": 0.15,
+            # Query: Cost $0.0082 × 12 = $0.10 (92% margin)
+            "query": 0.10,
             
-            # Document overage: Cost $0.05 → Price $0.50 (90% margin)
-            "document": 0.50,
+            # Document: Cost $0.035 × 11 = $0.40 (91% margin)
+            "document": 0.40,
             
-            # Photo overage: Cost $0.02 → Price $0.20 (90% margin)
+            # Photo: Cost $0.016 × 12.5 = $0.20 (92% margin)
             "photo": 0.20,
             
-            # Storage overage: Cost $0.021 → Price $0.25 (92% margin)
-            "storage_gb": 0.25,
-            
-            # Memory search overage: Cost $0.0001 → Price $0.001 (90% margin)
-            "memory_search": 0.001,
+            # Storage: Cost $0.20 × 10 = $2.00 (90% margin!)
+            "storage_gb": 2.00,
         }
         
         # =================================================================
@@ -106,64 +137,6 @@ class PricingService:
         self.USD_TO_INR = 83
     
     # =========================================================================
-    # PRICING INFO
-    # =========================================================================
-    
-    def get_pricing(self) -> Dict[str, Any]:
-        """Get pricing info"""
-        return {
-            "plan": "SiteMind Enterprise",
-            "flat_fee_usd": self.FLAT_FEE_USD,
-            "flat_fee_inr": self.FLAT_FEE_USD * self.USD_TO_INR,
-            "included": self.INCLUDED,
-            "usage_prices": self.USAGE_PRICES,
-            "annual_discount": self.ANNUAL_DISCOUNT,
-            "annual_price_usd": self.FLAT_FEE_USD * 12 * (1 - self.ANNUAL_DISCOUNT),
-        }
-    
-    def get_pricing_page(self) -> str:
-        """Formatted pricing for display"""
-        annual = int(self.FLAT_FEE_USD * 12 * (1 - self.ANNUAL_DISCOUNT))
-        
-        return f"""
-🏗️ **SiteMind Pricing**
-
-ONE subscription. ALL your projects.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**${self.FLAT_FEE_USD}/month** per company
-
-✓ **Unlimited projects** - 1 or 100, same price
-✓ **Unlimited users** - Add your whole team
-✓ {self.INCLUDED['queries']:,} AI queries/month
-✓ {self.INCLUDED['documents']} documents/month
-✓ {self.INCLUDED['photos']} photo analyses/month
-✓ {self.INCLUDED['storage_gb']} GB storage
-✓ WhatsApp access 24/7
-✓ Complete audit trail
-✓ IS code database
-✓ Safety detection
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Usage (when you exceed limits)**
-
-• Query: ${self.USAGE_PRICES['query']:.2f}/query
-• Document: ${self.USAGE_PRICES['document']:.2f}/document
-• Photo: ${self.USAGE_PRICES['photo']:.2f}/photo
-• Storage: ${self.USAGE_PRICES['storage_gb']:.2f}/GB
-
-_Tracked during month, billed next cycle_
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Annual:** ${annual:,}/year (save {int(self.ANNUAL_DISCOUNT * 100)}%)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-    
-    # =========================================================================
     # COST CALCULATION
     # =========================================================================
     
@@ -173,36 +146,42 @@ _Tracked during month, billed next cycle_
         documents: int,
         photos: int,
         storage_gb: float,
-        memory_searches: int = 0,
+        whatsapp_messages: int = None,
     ) -> Dict[str, Any]:
-        """Calculate what WE pay for this usage"""
+        """Calculate what WE actually pay for this usage"""
         
-        # Supermemory base cost (Pro plan)
-        supermemory_base = 19.0  # $19/month
+        # If not specified, estimate WhatsApp messages as 2x queries
+        if whatsapp_messages is None:
+            whatsapp_messages = queries * 2
         
-        # Gemini costs
-        gemini_cost = (
-            queries * self.COSTS["query"] +
-            documents * self.COSTS["document"] +
-            photos * self.COSTS["photo"]
-        )
-        
-        # Storage cost (Supabase)
+        # Variable costs
+        query_cost = queries * self.COSTS["query"]
+        document_cost = documents * self.COSTS["document"]
+        photo_cost = photos * self.COSTS["photo"]
         storage_cost = storage_gb * self.COSTS["storage_gb"]
+        whatsapp_cost = whatsapp_messages * self.COSTS["whatsapp_message"]
         
-        # Memory overage (beyond Pro plan included)
-        memory_overage_cost = 0
-        if memory_searches > 100000:  # Pro plan includes 100K
-            excess = memory_searches - 100000
-            memory_overage_cost = excess * self.COSTS["memory_search"]
+        variable_total = query_cost + document_cost + photo_cost + storage_cost + whatsapp_cost
         
-        total = supermemory_base + gemini_cost + storage_cost + memory_overage_cost
+        # Total including fixed costs
+        total = self.TOTAL_FIXED_COST + variable_total
         
         return {
-            "supermemory_base": supermemory_base,
-            "gemini": round(gemini_cost, 2),
-            "storage": round(storage_cost, 2),
-            "memory_overage": round(memory_overage_cost, 2),
+            "fixed_costs": {
+                "supermemory": self.FIXED_COSTS["supermemory_pro"],
+                "supabase": self.FIXED_COSTS["supabase_pro"],
+                "railway": self.FIXED_COSTS["railway_hosting"],
+                "twilio": self.FIXED_COSTS["twilio_number"],
+                "subtotal": self.TOTAL_FIXED_COST,
+            },
+            "variable_costs": {
+                "queries": round(query_cost, 4),
+                "documents": round(document_cost, 4),
+                "photos": round(photo_cost, 4),
+                "storage": round(storage_cost, 4),
+                "whatsapp": round(whatsapp_cost, 4),
+                "subtotal": round(variable_total, 4),
+            },
             "total": round(total, 2),
         }
     
@@ -263,25 +242,29 @@ _Tracked during month, billed next cycle_
         results = {}
         
         items = [
-            ("query", "Query"),
-            ("document", "Document"),
-            ("photo", "Photo"),
-            ("storage_gb", "Storage"),
+            ("query", "Query", "per query"),
+            ("document", "Document", "per doc"),
+            ("photo", "Photo", "per photo"),
+            ("storage_gb", "Storage", "per GB"),
         ]
         
-        for key, label in items:
+        for key, label, unit in items:
             cost = self.COSTS.get(key, 0)
             price = self.USAGE_PRICES.get(key, 0)
             
             if price > 0:
                 margin = ((price - cost) / price) * 100
+                profit_per_unit = price - cost
             else:
                 margin = 0
+                profit_per_unit = 0
             
             results[key] = {
                 "label": label,
-                "cost": f"${cost:.4f}",
-                "price": f"${price:.2f}",
+                "unit": unit,
+                "our_cost": f"${cost:.4f}",
+                "our_price": f"${price:.2f}",
+                "profit": f"${profit_per_unit:.4f}",
                 "margin": f"{margin:.0f}%",
                 "status": "✅" if margin >= 85 else "⚠️" if margin >= 70 else "❌",
             }
@@ -289,55 +272,86 @@ _Tracked during month, billed next cycle_
         return results
     
     def print_margin_report(self) -> str:
-        """Print margin report"""
+        """Print detailed margin report"""
         margins = self.verify_margins()
         
         lines = [
             "",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            "             MARGIN VERIFICATION REPORT",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "━" * 70,
+            "                    MARGIN VERIFICATION REPORT",
+            "━" * 70,
             "",
-            f"{'Item':<12} {'Our Cost':<12} {'Our Price':<12} {'Margin':<10} {'Status'}",
-            "─" * 55,
+            f"{'Item':<12} {'Our Cost':<14} {'Our Price':<12} {'Profit':<12} {'Margin':<10} {'OK'}",
+            "─" * 70,
         ]
         
         for key, data in margins.items():
             lines.append(
-                f"{data['label']:<12} {data['cost']:<12} {data['price']:<12} {data['margin']:<10} {data['status']}"
+                f"{data['label']:<12} {data['our_cost']:<14} {data['our_price']:<12} {data['profit']:<12} {data['margin']:<10} {data['status']}"
             )
         
         lines.extend([
             "",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "─" * 70,
+            "COST BREAKDOWN PER UNIT:",
+            "─" * 70,
             "",
+            "Query ($0.0082 total):",
+            f"  • Gemini 3 Pro:     $0.008 (1K input + 500 output tokens)",
+            f"  • Supermemory:      $0.0001 (search) + $0.000005 (tokens)",
+            "",
+            "Document ($0.035 total):",
+            f"  • Gemini Vision:    $0.035 (PDF processing ~5K tokens)",
+            f"  • Supermemory:      $0.00002 (storage)",
+            f"  • Supabase:         $0.00002 (file storage)",
+            "",
+            "Photo ($0.016 total):",
+            f"  • Gemini Vision:    $0.016 (image analysis ~2K tokens)",
+            f"  • Supermemory:      $0.000005 (storage)",
+            f"  • Supabase:         $0.00004 (file storage)",
+            "",
+            "Storage per GB ($0.20 total):",
+            f"  • Supabase storage: $0.021",
+            f"  • Bandwidth (2x):   $0.18",
+            "",
+            "━" * 70,
+            f"FIXED MONTHLY COSTS: ${self.TOTAL_FIXED_COST:.2f}",
+            "━" * 70,
+            f"  • Supermemory Pro:  ${self.FIXED_COSTS['supermemory_pro']:.2f}",
+            f"  • Supabase Pro:     ${self.FIXED_COSTS['supabase_pro']:.2f}",
+            f"  • Railway:          ${self.FIXED_COSTS['railway_hosting']:.2f}",
+            f"  • Twilio:           ${self.FIXED_COSTS['twilio_number']:.2f}",
+            "",
+            "━" * 70,
         ])
         
         return "\n".join(lines)
     
     # =========================================================================
-    # URBANRISE SIMULATION
+    # WHALE SIMULATION
     # =========================================================================
     
-    def simulate_urbanrise_month(self) -> Dict[str, Any]:
-        """
-        Simulate Urbanrise usage to verify profitability
+    def simulate_whale(
+        self,
+        name: str,
+        projects: int,
+        users: int,
+        queries_per_user: int = 30,
+        docs_per_project: int = 30,
+        photos_per_project: int = 150,
+        storage_gb: float = 100,
+    ) -> Dict[str, Any]:
+        """Simulate a whale customer's monthly bill and our profit"""
         
-        Assumptions:
-        - 30 active projects
-        - 500 users
-        - Heavy usage
-        """
-        # Expected usage for a whale like Urbanrise
-        queries = 8000        # 8K queries (heavy usage)
-        documents = 150       # 150 documents
-        photos = 600          # 600 photos
-        storage_gb = 40       # 40 GB
-        memory_searches = 200000  # Heavy memory usage
+        # Calculate usage
+        queries = users * queries_per_user
+        documents = projects * docs_per_project
+        photos = projects * photos_per_project
+        whatsapp_messages = queries * 2  # 2 messages per query (Q + A)
         
         # Our costs
         our_cost = self.calculate_our_cost(
-            queries, documents, photos, storage_gb, memory_searches
+            queries, documents, photos, storage_gb, whatsapp_messages
         )
         
         # Customer charges
@@ -353,12 +367,15 @@ _Tracked during month, billed next cycle_
         margin = (profit / revenue) * 100 if revenue > 0 else 0
         
         return {
-            "company": "Urbanrise (Simulated)",
+            "company": name,
+            "projects": projects,
+            "users": users,
             "usage": {
                 "queries": queries,
                 "documents": documents,
                 "photos": photos,
                 "storage_gb": storage_gb,
+                "whatsapp_messages": whatsapp_messages,
             },
             "our_cost": our_cost,
             "flat_fee": self.FLAT_FEE_USD,
@@ -368,55 +385,123 @@ _Tracked during month, billed next cycle_
             "margin": f"{margin:.0f}%",
         }
     
-    def print_urbanrise_simulation(self) -> str:
-        """Print Urbanrise simulation"""
-        sim = self.simulate_urbanrise_month()
+    def print_whale_simulation(self, sim: Dict) -> str:
+        """Print whale simulation"""
         
         return f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+         {sim['company'].upper()} - MONTHLY SIMULATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCALE: {sim['projects']} projects, {sim['users']} users
+
+USAGE:
+• Queries:         {sim['usage']['queries']:,}
+• Documents:       {sim['usage']['documents']:,}
+• Photos:          {sim['usage']['photos']:,}
+• Storage:         {sim['usage']['storage_gb']} GB
+• WhatsApp msgs:   {sim['usage']['whatsapp_messages']:,}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OUR COSTS (what we actually pay):
+
+Fixed:
+  • Supermemory:    ${sim['our_cost']['fixed_costs']['supermemory']:.2f}
+  • Supabase:       ${sim['our_cost']['fixed_costs']['supabase']:.2f}
+  • Railway:        ${sim['our_cost']['fixed_costs']['railway']:.2f}
+  • Twilio:         ${sim['our_cost']['fixed_costs']['twilio']:.2f}
+  ─────────────────────────────
+  Fixed subtotal:   ${sim['our_cost']['fixed_costs']['subtotal']:.2f}
+
+Variable:
+  • Queries:        ${sim['our_cost']['variable_costs']['queries']:.2f}
+  • Documents:      ${sim['our_cost']['variable_costs']['documents']:.2f}
+  • Photos:         ${sim['our_cost']['variable_costs']['photos']:.2f}
+  • Storage:        ${sim['our_cost']['variable_costs']['storage']:.2f}
+  • WhatsApp:       ${sim['our_cost']['variable_costs']['whatsapp']:.2f}
+  ─────────────────────────────
+  Variable subtotal: ${sim['our_cost']['variable_costs']['subtotal']:.2f}
+
+─────────────────────────────────────────────────────────────────────
+TOTAL OUR COST:     ${sim['our_cost']['total']:.2f}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CUSTOMER BILL:
+
+  Flat Fee:         ${sim['flat_fee']:,.2f}
+  Usage Charges:    ${sim['usage_charges']:,.2f}
+  ─────────────────────────────
+  TOTAL REVENUE:    ${sim['total_revenue']:,.2f}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💰 PROFIT:          ${sim['profit']:,.2f}
+📈 MARGIN:          {sim['margin']}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ANNUAL: ${sim['total_revenue'] * 12:,.0f} revenue, ${sim['profit'] * 12:,.0f} profit
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+    
+    # =========================================================================
+    # PRICING INFO
+    # =========================================================================
+    
+    def get_pricing(self) -> Dict[str, Any]:
+        """Get pricing info"""
+        return {
+            "plan": "SiteMind Enterprise",
+            "flat_fee_usd": self.FLAT_FEE_USD,
+            "flat_fee_inr": self.FLAT_FEE_USD * self.USD_TO_INR,
+            "included": self.INCLUDED,
+            "usage_prices": self.USAGE_PRICES,
+            "annual_discount": self.ANNUAL_DISCOUNT,
+            "annual_price_usd": self.FLAT_FEE_USD * 12 * (1 - self.ANNUAL_DISCOUNT),
+        }
+    
+    def get_pricing_page(self) -> str:
+        """Formatted pricing for display"""
+        annual = int(self.FLAT_FEE_USD * 12 * (1 - self.ANNUAL_DISCOUNT))
+        
+        return f"""
+🏗️ **SiteMind Pricing**
+
+ONE subscription. ALL your projects.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-         URBANRISE MONTHLY SIMULATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-USAGE (30 projects, 500 users):
-• Queries:     {sim['usage']['queries']:,}
-• Documents:   {sim['usage']['documents']}
-• Photos:      {sim['usage']['photos']}
-• Storage:     {sim['usage']['storage_gb']} GB
+**${self.FLAT_FEE_USD}/month** per company
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-OUR COSTS:
-• Supermemory:  ${sim['our_cost']['supermemory_base']:.2f}
-• Gemini API:   ${sim['our_cost']['gemini']:.2f}
-• Storage:      ${sim['our_cost']['storage']:.2f}
-• Memory extra: ${sim['our_cost']['memory_overage']:.2f}
-─────────────────────────────────
-• TOTAL COST:   ${sim['our_cost']['total']:.2f}
+✓ **Unlimited projects**
+✓ **Unlimited users**  
+✓ {self.INCLUDED['queries']:,} AI queries/month
+✓ {self.INCLUDED['documents']} documents/month
+✓ {self.INCLUDED['photos']} photo analyses/month
+✓ {self.INCLUDED['storage_gb']} GB storage
+✓ WhatsApp 24/7
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-REVENUE:
-• Flat Fee:     ${sim['flat_fee']:,.2f}
-• Usage:        ${sim['usage_charges']:.2f}
-─────────────────────────────────
-• TOTAL:        ${sim['total_revenue']:,.2f}
+**Usage (when you exceed limits)**
+
+• Query: ${self.USAGE_PRICES['query']:.2f}/query
+• Document: ${self.USAGE_PRICES['document']:.2f}/document
+• Photo: ${self.USAGE_PRICES['photo']:.2f}/photo
+• Storage: ${self.USAGE_PRICES['storage_gb']:.2f}/GB
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-PROFIT:         ${sim['profit']:,.2f}
-MARGIN:         {sim['margin']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-ANNUAL PROJECTION:
-• Revenue:      ${sim['total_revenue'] * 12:,.0f}/year
-• Profit:       ${sim['profit'] * 12:,.0f}/year
+**Annual:** ${annual:,}/year (save {int(self.ANNUAL_DISCOUNT * 100)}%)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
     
     # =========================================================================
-    # INVOICE GENERATION
+    # INVOICE
     # =========================================================================
     
     def generate_invoice(
@@ -429,17 +514,12 @@ ANNUAL PROJECTION:
     ) -> Dict[str, Any]:
         """Generate invoice"""
         
-        # Pilot = free
         if is_pilot:
             return {
                 "invoice_id": f"INV-PILOT-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
                 "company": company_name,
                 "date": datetime.utcnow().strftime("%Y-%m-%d"),
                 "period": "Pilot",
-                "flat_fee_usd": 0,
-                "discount_type": "pilot",
-                "discount_amount": self.FLAT_FEE_USD,
-                "usage": None,
                 "total_usd": 0,
                 "total_inr": 0,
                 "note": "Pilot program - first 3 months free",
@@ -454,19 +534,19 @@ ANNUAL PROJECTION:
             period = "Monthly"
         
         # Founding discount
-        founding_discount = 0
+        discount_amount = 0
         discount_type = None
         if is_founding:
-            founding_discount = flat_fee * self.FOUNDING_DISCOUNT
-            flat_fee = flat_fee - founding_discount
+            discount_amount = flat_fee * self.FOUNDING_DISCOUNT
+            flat_fee = flat_fee - discount_amount
             discount_type = "founding"
         elif is_annual:
             discount_type = "annual"
+            discount_amount = self.FLAT_FEE_USD * 12 * self.ANNUAL_DISCOUNT
         
-        # Usage charges from previous cycle
+        # Usage charges
         usage_charges = None
         usage_total = 0
-        
         if previous_usage:
             usage_charges = self.calculate_usage_charges(
                 queries=previous_usage.get("queries", 0),
@@ -486,109 +566,13 @@ ANNUAL PROJECTION:
             "period": period,
             "flat_fee_usd": self.FLAT_FEE_USD if not is_annual else self.FLAT_FEE_USD * 12,
             "discount_type": discount_type,
-            "discount_amount": founding_discount if is_founding else (
-                self.FLAT_FEE_USD * 12 * self.ANNUAL_DISCOUNT if is_annual else 0
-            ),
+            "discount_amount": discount_amount,
             "net_flat_fee_usd": flat_fee,
             "usage": usage_charges,
             "usage_total_usd": usage_total,
             "total_usd": round(total, 2),
             "total_inr": round(total * self.USD_TO_INR, 2),
         }
-    
-    def format_invoice(self, invoice: Dict) -> str:
-        """Format invoice for display"""
-        
-        if invoice.get("note") and "Pilot" in invoice.get("period", ""):
-            return f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                    SITEMIND INVOICE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Invoice:  {invoice['invoice_id']}
-Company:  {invoice['company']}
-Date:     {invoice['date']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🎉 PILOT PROGRAM
-
-{invoice['note']}
-
-SiteMind Enterprise                      $1,000.00
-Pilot Discount (100%)                   -$1,000.00
-                                         ─────────
-TOTAL DUE                                    $0.00
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-        
-        msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                    SITEMIND INVOICE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Invoice:  {invoice['invoice_id']}
-Company:  {invoice['company']}
-Date:     {invoice['date']}
-Due:      {invoice['due_date']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SUBSCRIPTION ({invoice['period']})
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-SiteMind Enterprise                      ${invoice['flat_fee_usd']:,.2f}
-• Unlimited projects
-• Unlimited users
-• {self.INCLUDED['queries']:,} queries
-• {self.INCLUDED['documents']} documents
-• {self.INCLUDED['photos']} photos
-• {self.INCLUDED['storage_gb']} GB storage"""
-
-        if invoice.get('discount_type') == 'founding':
-            msg += f"""
-
-Founding Customer Discount (-25%)       -${invoice['discount_amount']:,.2f}"""
-        elif invoice.get('discount_type') == 'annual':
-            msg += f"""
-
-Annual Discount (-17%)                  -${invoice['discount_amount']:,.2f}"""
-
-        if invoice.get('discount_type'):
-            msg += f"""
-                                         ─────────
-Subscription Total                       ${invoice['net_flat_fee_usd']:,.2f}"""
-
-        usage = invoice.get('usage')
-        if usage and usage.get('total_usd', 0) > 0:
-            msg += f"""
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USAGE (from previous billing cycle)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-            for item, data in usage['breakdown'].items():
-                if data['overage'] > 0:
-                    label = item.replace('_', ' ').title()
-                    msg += f"""
-{label:12}  {data['used']:>6} used ({data['included']:,} included)
-              {data['overage']:>6} extra × ${data['rate']:.2f}      ${data['charge']:>8.2f}"""
-            
-            msg += f"""
-
-                                         ─────────
-Usage Total                              ${usage['total_usd']:>8.2f}"""
-
-        msg += f"""
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-TOTAL DUE                                ${invoice['total_usd']:>8.2f}
-                                         ₹{invoice['total_inr']:>,.0f}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-        return msg
 
 
 # Singleton instance
@@ -598,4 +582,15 @@ pricing_service = PricingService()
 # Quick test
 if __name__ == "__main__":
     print(pricing_service.print_margin_report())
-    print(pricing_service.print_urbanrise_simulation())
+    
+    # Simulate Urbanrise
+    urbanrise = pricing_service.simulate_whale(
+        name="Urbanrise",
+        projects=30,
+        users=500,
+        queries_per_user=30,
+        docs_per_project=30,
+        photos_per_project=150,
+        storage_gb=100,
+    )
+    print(pricing_service.print_whale_simulation(urbanrise))
