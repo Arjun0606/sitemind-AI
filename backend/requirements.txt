@@ -1,6 +1,9 @@
 # SiteMind Backend Dependencies
+# Target: $400k/month by June 2025
 
-# Core
+# ====================================
+# Core Framework
+# ====================================
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 pydantic==2.5.3
@@ -8,17 +11,24 @@ pydantic-settings==2.1.0
 python-multipart==0.0.6
 python-dotenv==1.0.0
 
-# HTTP
+# ====================================
+# HTTP Client
+# ====================================
 httpx==0.26.0
 
-# Twilio (WhatsApp)
-twilio==8.10.0
+# ====================================
+# AI & Memory
+# ====================================
+google-generativeai>=0.3.0    # Gemini API
+supermemory>=0.1.0            # Long-term memory
 
-# Logging
-loguru==0.7.2
+# ====================================
+# Communication
+# ====================================
+twilio==8.10.0                # WhatsApp
 
-# Database (Supabase)
-# supabase-py is optional, we use REST API directly
-
-# For image processing (optional)
-Pillow==10.2.0
+# ====================================
+# Utilities
+# ====================================
+loguru==0.7.2                 # Logging
+Pillow==10.2.0                # Image processing

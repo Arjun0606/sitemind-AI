@@ -220,8 +220,9 @@ async def handle_command(
         if match:
             query = match.group(1)
             results = await memory_service.search(
-                project_id=project_id or company_id,
+                company_id=company_id,
                 query=query,
+                project_id=project_id,
                 limit=5,
             )
             
@@ -263,10 +264,10 @@ async def handle_query(
     intent = command_handler.detect_intent(question)
     
     # Get context from memory
-    context = await memory_service.search(
-        project_id=project_id or company_id,
+    context = await memory_service.get_context(
+        company_id=company_id,
+        project_id=project_id or "default",
         query=question,
-        limit=5,
     )
     
     # Track memory recall (WOW moment!)
@@ -320,7 +321,8 @@ async def handle_query(
     
     # Store Q&A in memory
     await memory_service.add_query(
-        project_id=project_id or company_id,
+        company_id=company_id,
+        project_id=project_id or "default",
         question=question,
         answer=answer,
         user_id=user_id,
@@ -466,11 +468,13 @@ async def handle_image(
     )
     
     # Store in memory
-    await memory_service.add_memory(
-        project_id=project_id or company_id,
-        content=f"Photo analysis: {analysis_text[:500]}",
-        memory_type="photo_analysis",
-        metadata={"caption": caption, "file_path": upload.get("path")},
+    await memory_service.add_photo_analysis(
+        company_id=company_id,
+        project_id=project_id or "default",
+        caption=caption or "",
+        analysis=analysis_text,
+        file_path=upload.get("path"),
+        photo_type=analysis_type,
         user_id=user_id,
     )
     
