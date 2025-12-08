@@ -149,7 +149,13 @@ class MemoryService:
                     container_tag=container_tag,
                 )
                 
-                memory_id = result.get("id") or f"sm_{timestamp}"
+                # Handle SDK response object (not dict)
+                if hasattr(result, 'id'):
+                    memory_id = result.id
+                elif hasattr(result, '__dict__'):
+                    memory_id = getattr(result, 'id', None) or f"sm_{timestamp}"
+                else:
+                    memory_id = f"sm_{timestamp}"
                 
                 logger.info(f"💾 Memory added to Supermemory: {content[:50]}...")
                 
@@ -280,12 +286,26 @@ class MemoryService:
                     q=search_query,
                 )
                 
-                memories = result.get("memories", [])
+                # Handle SDK response object (not dict)
+                if hasattr(result, 'memories'):
+                    memories = result.memories or []
+                elif hasattr(result, '__dict__'):
+                    memories = getattr(result, 'memories', []) or []
+                else:
+                    memories = []
                 
                 # Parse and filter results
                 parsed = []
                 for mem in memories[:limit]:
-                    content = mem.get("content", "")
+                    # Handle both dict and object responses
+                    if hasattr(mem, 'content'):
+                        content = mem.content or ""
+                        mem_id = getattr(mem, 'id', None)
+                        mem_score = getattr(mem, 'score', 0)
+                    else:
+                        content = mem.get("content", "") if isinstance(mem, dict) else ""
+                        mem_id = mem.get("id") if isinstance(mem, dict) else None
+                        mem_score = mem.get("score", 0) if isinstance(mem, dict) else 0
                     
                     # Filter by project if specified
                     if project_id and f"[Project: {project_id}]" not in content:
@@ -298,9 +318,9 @@ class MemoryService:
                             continue
                     
                     parsed.append({
-                        "id": mem.get("id"),
+                        "id": mem_id,
                         "content": self._extract_clean_content(content),
-                        "score": mem.get("score", 0),
+                        "score": mem_score,
                         "metadata": self._extract_metadata(content),
                     })
                 
