@@ -280,32 +280,32 @@ class MemoryService:
             try:
                 container_tag = self._get_container_tag(company_id)
                 
-                # Use profile for enriched context
-                result = self.client.profile(
-                    container_tag=container_tag,
+                # Use search.execute for semantic search
+                result = self.client.search.execute(
+                    container_tags=[container_tag],
                     q=search_query,
+                    limit=limit,
                 )
                 
-                # Handle SDK response object (not dict)
-                if hasattr(result, 'memories'):
-                    memories = result.memories or []
-                elif hasattr(result, '__dict__'):
-                    memories = getattr(result, 'memories', []) or []
-                else:
-                    memories = []
+                # Handle SDK SearchExecuteResponse
+                results_list = result.results or []
                 
-                # Parse and filter results
+                # Parse results with full context
                 parsed = []
-                for mem in memories[:limit]:
-                    # Handle both dict and object responses
-                    if hasattr(mem, 'content'):
-                        content = mem.content or ""
-                        mem_id = getattr(mem, 'id', None)
-                        mem_score = getattr(mem, 'score', 0)
-                    else:
-                        content = mem.get("content", "") if isinstance(mem, dict) else ""
-                        mem_id = mem.get("id") if isinstance(mem, dict) else None
-                        mem_score = mem.get("score", 0) if isinstance(mem, dict) else 0
+                for res in results_list[:limit]:
+                    # Get content from chunks
+                    content = ""
+                    if res.chunks:
+                        content = res.chunks[0].content or ""
+                    
+                    # Also check res.content and res.summary
+                    if not content and res.content:
+                        content = res.content
+                    
+                    mem_id = res.document_id
+                    mem_score = res.score or 0
+                    title = res.title or ""
+                    created_at = res.created_at or ""
                     
                     # Filter by project if specified
                     if project_id and f"[Project: {project_id}]" not in content:
@@ -320,7 +320,10 @@ class MemoryService:
                     parsed.append({
                         "id": mem_id,
                         "content": self._extract_clean_content(content),
+                        "raw_content": content,  # Keep raw for citation extraction
                         "score": mem_score,
+                        "title": title,
+                        "created_at": created_at,
                         "metadata": self._extract_metadata(content),
                     })
                 
@@ -335,10 +338,32 @@ class MemoryService:
     
     def _extract_clean_content(self, enriched_content: str) -> str:
         """Extract clean content from enriched format"""
+        # The content includes metadata in format: [TYPE] [Project: X] [Date: Y] actual content
+        # We want to preserve the actual content and key metadata
+        
+        # If content is empty or just metadata
+        if not enriched_content or not enriched_content.strip():
+            return ""
+        
+        # Try to extract content after the metadata prefix
+        # Pattern: [INFO] [Project: marina_tower_b] [Date: 2025-12-08] Actual content here
+        import re
+        
+        # Find where actual content starts (after last ] )
+        match = re.search(r'\] ([^[\]]+)$', enriched_content)
+        if match:
+            return match.group(1).strip()
+        
+        # Fallback: return everything after metadata tags
         lines = enriched_content.split("\n")
-        # Skip metadata lines (start with [)
-        content_lines = [l for l in lines if not l.startswith("[") and l.strip()]
-        return "\n".join(content_lines)
+        content_lines = []
+        for line in lines:
+            # Remove leading metadata tags but keep content
+            cleaned = re.sub(r'^\[[\w\s:-]+\]\s*', '', line)
+            if cleaned.strip():
+                content_lines.append(cleaned.strip())
+        
+        return "\n".join(content_lines) if content_lines else enriched_content
     
     def _extract_metadata(self, enriched_content: str) -> Dict:
         """Extract metadata from enriched content"""

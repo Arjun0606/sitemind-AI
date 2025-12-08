@@ -31,7 +31,10 @@ from services.command_handler import command_handler
 # Subscription & Billing
 from services.subscription_reminder_service import subscription_reminder_service
 
-# Leakage Prevention (THE CORE!)
+# THE SIMPLE CORE - This is all you need
+from services.sitemind_core import sitemind_core
+
+# Legacy services (kept for backwards compatibility)
 from services.leakage_prevention_service import leakage_prevention_service
 from services.office_sync_service import office_sync_service
 from services.ultimate_leakage_engine import ultimate_leakage_engine
@@ -66,7 +69,10 @@ __all__ = [
     # Subscription & Billing
     "subscription_reminder_service",
     
-    # Leakage Prevention (THE CORE!)
+    # THE SIMPLE CORE
+    "sitemind_core",
+    
+    # Legacy services
     "leakage_prevention_service",
     "office_sync_service",
     "ultimate_leakage_engine",
