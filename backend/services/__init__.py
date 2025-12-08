@@ -35,6 +35,7 @@ from services.subscription_reminder_service import subscription_reminder_service
 from services.leakage_prevention_service import leakage_prevention_service
 from services.office_sync_service import office_sync_service
 from services.ultimate_leakage_engine import ultimate_leakage_engine
+from services.material_tracker_service import material_tracker_service
 
 __all__ = [
     # Core AI
@@ -69,4 +70,5 @@ __all__ = [
     "leakage_prevention_service",
     "office_sync_service",
     "ultimate_leakage_engine",
+    "material_tracker_service",
 ]
