@@ -7,6 +7,7 @@ Every message is an opportunity to deliver value.
 
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
+from datetime import datetime
 import httpx
 import re
 
@@ -25,6 +26,8 @@ from services import (
     alert_service,
     leakage_prevention_service,
     office_sync_service,
+    sitemind_core,
+    document_ingestion_service,
 )
 from database import db
 from utils.logger import logger
@@ -254,13 +257,40 @@ async def handle_query(
     project_id: str,
     project_name: str,
 ):
-    """Handle text query - the core AI experience"""
+    """
+    Handle text query - THE CORE AI EXPERIENCE
+    
+    Uses sitemind_core which:
+    1. Stores the message (info dump)
+    2. Retrieves ALL relevant context
+    3. Generates response with CITATIONS
+    4. Stores the conversation
+    """
     
     # Track for billing
     billing_service.track_query(company_id, company_name)
-    
-    # Track for daily brief
     daily_brief_service.track_query(project_id or company_id)
+    
+    # Get user info
+    user = await db.get_user_by_phone(phone)
+    user_name = user.get("name", "") if user else ""
+    
+    # USE SITEMIND CORE - This is the magic!
+    # It handles: context retrieval, AI response, citations, storage
+    result = await sitemind_core.process_message(
+        message=question,
+        company_id=company_id,
+        project_id=project_id or "default",
+        user_id=user_id,
+        user_name=user_name,
+    )
+    
+    answer = result.get("answer", "Sorry, I couldn't process that.")
+    context_used = result.get("context_used", 0)
+    
+    # Track memory recall (WOW moment!)
+    if context_used > 0:
+        wow_service.track_memory_recall(user_id, company_id)
     
     # Track for office sync
     office_sync_service.track_query(
@@ -270,106 +300,15 @@ async def handle_query(
         user_id=user_id,
     )
     
-    # LEAKAGE PREVENTION: Analyze every message!
-    leakage_analysis = await leakage_prevention_service.analyze_message(
-        message=question,
-        company_id=company_id,
-        project_id=project_id or "default",
-        user_id=user_id,
-    )
-    
-    # Detect intent
-    intent = command_handler.detect_intent(question)
-    
-    # Get context from memory (including conversation history!)
-    context = await memory_service.get_context(
-        company_id=company_id,
-        project_id=project_id or "default",
-        query=question,
-        user_id=user_id,  # For conversation continuity
-    )
-    
-    # Track memory recall (WOW moment!)
-    if context:
-        wow_service.track_memory_recall(user_id, company_id)
-    
-    # Query Gemini
-    response = await gemini_service.query(
-        question=question,
-        context=context,
-        project_info={"name": project_name, "project_type": "construction"},
-    )
-    
-    answer = response.get("answer", "Sorry, I couldn't process that.")
-    
-    # INTELLIGENCE ENHANCEMENT - Safety, conflicts, expert tips
-    enhanced = await intelligence_service.enhance_response(
-        question=question,
-        answer=answer,
-        context=context,
-        project_id=project_id or company_id,
-    )
-    answer = enhanced["answer"]
-    
-    # Track safety flags
-    if enhanced.get("alerts"):
-        for alert in enhanced["alerts"]:
-            if alert["type"] == "safety":
-                wow_service.track_safety_flag(user_id, company_id)
-                daily_brief_service.track_safety_flag(project_id or company_id)
-                
-                # Create alert
-                alert_service.safety_alert(
-                    company_id=company_id,
-                    project_id=project_id,
-                    issue=question,
-                    recommendation="Review the flagged safety concern",
-                )
-    
     # Track code references
     has_code_ref = any(code in answer.lower() for code in ["is ", "is:", "nbc", "code", "clause"])
     wow_service.track_query(user_id, company_id, had_code_reference=has_code_ref)
     
-    # Add memory context indicator
-    if context and len(context) > 0:
-        answer += "\n\n📝 _Based on project memory_"
-    
     # Add project indicator
-    if project_name:
-        answer += f"\n🏗️ _{project_name}_"
+    if project_name and project_name != "Default":
+        answer += f"\n\n🏗️ _{project_name}_"
     
-    # LEAKAGE PREVENTION: Add warnings if detected
-    if leakage_analysis.get("recommendations"):
-        answer += "\n\n━━━━━━━━━━━━━━━"
-        for rec in leakage_analysis["recommendations"]:
-            answer += f"\n{rec}"
-    
-    # If change order detected, track it
-    if leakage_analysis.get("change_order"):
-        office_sync_service.track_change_order(
-            project_id=project_id or "default",
-            company_id=company_id,
-            description=question[:100],
-        )
-    
-    # If billable work detected, track it
-    if leakage_analysis.get("billable_work"):
-        office_sync_service.track_billable(
-            project_id=project_id or "default",
-            company_id=company_id,
-            description=question[:100],
-        )
-    
-    # Store Q&A in memory
-    await memory_service.add_query(
-        company_id=company_id,
-        project_id=project_id or "default",
-        question=question,
-        answer=answer,
-        user_id=user_id,
-    )
-    
-    # Log to database
+    # Log to database (sitemind_core already stores in Supermemory)
     await db.log_query(
         company_id=company_id,
         project_id=project_id,
@@ -457,33 +396,68 @@ async def handle_image(
     project_id: str,
     index: int,
 ):
-    """Handle image analysis"""
+    """
+    Handle image - site photos, drawings, etc.
+    
+    DUMP EVERYTHING approach:
+    1. User sends any image via WhatsApp
+    2. If it's a drawing → ingest it
+    3. If it's a photo → analyze with context
+    4. Store everything in memory
+    """
     
     # Track for billing + WOW
     billing_service.track_photo(company_id)
     wow_service.track_photo(user_id, company_id)
     daily_brief_service.track_photo(project_id or company_id)
     
-    # Determine analysis type from caption
-    analysis_type = "general"
+    # Get user info
+    user = await db.get_user_by_phone(phone)
+    user_name = user.get("name", "") if user else ""
+    
+    # Check if this looks like a drawing (based on caption)
+    is_drawing = False
     if caption:
         caption_lower = caption.lower()
-        if "progress" in caption_lower:
-            analysis_type = "progress"
-        elif "issue" in caption_lower or "problem" in caption_lower:
-            analysis_type = "issue"
-        elif "check" in caption_lower or "verify" in caption_lower:
-            analysis_type = "verification"
+        if any(word in caption_lower for word in ['drawing', 'plan', 'layout', 'detail', 'section', 'elevation']):
+            is_drawing = True
     
-    # Analyze image
-    analysis = await gemini_service.analyze_image(
-        image_data=content,
-        mime_type=mime_type,
-        caption=caption,
-        analysis_type=analysis_type,
-    )
+    if is_drawing:
+        # Treat as drawing - ingest it
+        filename = f"drawing_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.png"
+        
+        await whatsapp_service.send_message(phone, "📐 Processing drawing...")
+        
+        doc = await document_ingestion_service.ingest_document(
+            company_id=company_id,
+            project_id=project_id or "default",
+            filename=filename,
+            file_data=content,
+            doc_type=document_ingestion_service.DocumentType.DRAWING,
+            uploaded_by=user_name or user_id,
+        )
+        
+        analysis_text = f"""*Drawing Analyzed & Stored*
+
+📐 {doc.filename}
+🔍 {len(doc.memory_ids)} searchable chunks
+
+{doc.summary[:300] if doc.summary else 'Drawing processed'}
+
+_Ask me anything about this drawing!_"""
     
-    analysis_text = analysis.get("analysis", "Could not analyze image.")
+    else:
+        # Regular photo - use sitemind_core for analysis with context
+        result = await sitemind_core.process_message(
+            message=caption or "Analyze this site photo",
+            company_id=company_id,
+            project_id=project_id or "default",
+            user_id=user_id,
+            user_name=user_name,
+            photo_data=content,
+        )
+        
+        analysis_text = result.get("answer", "Could not analyze image.")
     
     # Safety check on analysis
     safety = await intelligence_service.analyze_safety(
@@ -543,42 +517,94 @@ async def handle_document(
     project_id: str,
     index: int,
 ):
-    """Handle document upload"""
+    """
+    Handle document upload - PDF, drawings, specs, etc.
+    
+    DUMP EVERYTHING approach:
+    1. User sends any document via WhatsApp
+    2. We process it with Gemini
+    3. Store in Supermemory
+    4. Now AI can answer questions about it!
+    """
     
     # Track for billing
     billing_service.track_document(company_id)
     daily_brief_service.track_document(project_id or company_id)
     
-    # Store document
-    upload = await storage_service.upload_document(
-        file_content=content,
-        file_name=f"document_{index}.pdf",
-        content_type=mime_type,
-        company_id=company_id,
-        project_id=project_id,
-    )
+    # Get user info for citation
+    user = await db.get_user_by_phone(phone)
+    user_name = user.get("name", "") if user else ""
     
-    # Log to database
-    await db.log_document(
-        company_id=company_id,
-        project_id=project_id,
-        user_id=user_id,
-        name=f"document_{index}",
-        file_path=upload.get("path", ""),
-        file_type=mime_type,
-        file_size_bytes=len(content),
-    )
+    # Determine filename from mime type
+    ext = "pdf"
+    if "image" in mime_type:
+        ext = "png"
+    filename = f"upload_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{index}.{ext}"
     
+    # Send processing message
     await whatsapp_service.send_message(
         phone,
-        f"""📄 *Document Received*
-
-✅ Stored successfully
-📁 Size: {len(content) / 1024:.1f} KB
-
-_Document added to project memory._
-_Ask me questions about it!_"""
+        f"📄 Processing document... ({len(content) / 1024:.1f} KB)"
     )
+    
+    try:
+        # INGEST THE DOCUMENT - This is the magic!
+        doc = await document_ingestion_service.ingest_document(
+            company_id=company_id,
+            project_id=project_id or "default",
+            filename=filename,
+            file_data=content,
+            uploaded_by=user_name or user_id,
+        )
+        
+        # Store in Supabase too
+        upload = await storage_service.upload_document(
+            file_content=content,
+            file_name=filename,
+            content_type=mime_type,
+            company_id=company_id,
+            project_id=project_id,
+        )
+        
+        # Log to database
+        await db.log_document(
+            company_id=company_id,
+            project_id=project_id,
+            user_id=user_id,
+            name=filename,
+            file_path=upload.get("path", ""),
+            file_type=mime_type,
+            file_size_bytes=len(content),
+        )
+        
+        # Build response with what we found
+        summary = doc.summary[:200] if doc.summary else "Document processed"
+        key_count = len(doc.key_info)
+        chunks = len(doc.memory_ids)
+        
+        await whatsapp_service.send_message(
+            phone,
+            f"""✅ *Document Ingested!*
+
+📄 {filename}
+📊 {chunks} searchable chunks created
+🔍 {key_count} key items extracted
+
+*Summary:*
+{summary}...
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+_Now ask me anything about this document!_
+_Example: "What does the drawing say about column sizes?"_"""
+        )
+        
+    except Exception as e:
+        logger.error(f"Document ingestion error: {e}")
+        await whatsapp_service.send_message(
+            phone,
+            f"❌ Error processing document: {str(e)}\n\nThe file was saved but couldn't be analyzed."
+        )
 
 
 @router.get("/webhook")
