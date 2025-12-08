@@ -60,37 +60,45 @@ class PricingService:
         # =================================================================
         # OUR ACTUAL COSTS (PER UNIT) - INCLUDING ALL OVERAGES
         # =================================================================
-        
+        # 
+        # Sources:
+        # - Gemini 3 Pro: https://ai.google.dev/gemini-api/docs/gemini-3
+        #   Input: $2/M, Output: $12/M (under 200k context)
+        # - Supermemory: https://console.supermemory.ai/billing
+        #   Tokens: $0.01/1K, Searches: $0.10/1K
+        # - Supabase: $0.021/GB storage, $0.09/GB bandwidth
+        # - Twilio WhatsApp: $0.005/message
+        #
         self.COSTS = {
             # ----- PER QUERY -----
-            # Gemini 3 Pro: ~1K input tokens ($0.002) + ~500 output tokens ($0.006) = $0.008
-            # Supermemory search: 1 search = $0.0001 (overage rate)
-            # Supermemory token for context: ~500 tokens = $0.000005
-            # Total per query:
-            "query": 0.008 + 0.0001 + 0.000005,  # = $0.008105 ≈ $0.0082
+            # Gemini 3 Pro: 1K input ($0.002) + 500 output ($0.006) = $0.008
+            # Supermemory search: $0.10/1000 = $0.0001
+            # Supermemory tokens: 500 tokens × $0.01/1000 = $0.005
+            # WhatsApp: 2 messages × $0.005 = $0.01
+            # TOTAL: $0.0231
+            "query": 0.008 + 0.0001 + 0.005 + 0.01,  # = $0.0231
             
             # ----- PER DOCUMENT -----
-            # Gemini Vision for PDF: ~5K tokens = $0.035
-            # Supermemory storage: ~2K tokens = $0.00002
-            # Supabase storage: ~1MB = $0.000021
-            # Total per document:
-            "document": 0.035 + 0.00002 + 0.000021,  # = $0.035 ≈ $0.035
+            # Gemini Vision: 5K input ($0.01) + 1K output ($0.012) = $0.022
+            # Supermemory tokens: 2K × $0.01/1K = $0.02
+            # Supabase storage: ~1MB = negligible
+            # TOTAL: $0.043
+            "document": 0.022 + 0.02 + 0.001,  # = $0.043
             
             # ----- PER PHOTO -----
-            # Gemini Vision: ~2K tokens = $0.016
-            # Supermemory storage: ~500 tokens = $0.000005
-            # Supabase storage: ~2MB = $0.000042
-            # Total per photo:
-            "photo": 0.016 + 0.000005 + 0.000042,  # = $0.016 ≈ $0.016
+            # Gemini Vision: 2K input ($0.004) + 500 output ($0.006) = $0.01
+            # Supermemory tokens: 500 × $0.01/1K = $0.005
+            # Supabase storage: ~2MB = negligible
+            # TOTAL: $0.015
+            "photo": 0.01 + 0.005 + 0.0001,  # = $0.0151
             
             # ----- STORAGE (per GB/month) -----
-            # Supabase: $0.021/GB
-            # Bandwidth (assuming 2x reads): $0.18/GB
-            # Total per GB:
-            "storage_gb": 0.021 + 0.18,  # = $0.20 ≈ $0.20
+            # Supabase storage: $0.021/GB
+            # Bandwidth (2x reads): $0.18/GB
+            # TOTAL: $0.201
+            "storage_gb": 0.021 + 0.18,  # = $0.201
             
-            # ----- WHATSAPP MESSAGES -----
-            # Twilio: $0.005/message (we send ~2 messages per query)
+            # ----- WHATSAPP (already included in query) -----
             "whatsapp_message": 0.005,
         }
         
@@ -112,16 +120,16 @@ class PricingService:
         # =================================================================
         
         self.USAGE_PRICES = {
-            # Query: Cost $0.0082 × 12 = $0.10 (92% margin)
-            "query": 0.10,
+            # Query: Cost $0.0231 × 10 = $0.25 (90% margin)
+            "query": 0.25,
             
-            # Document: Cost $0.035 × 11 = $0.40 (91% margin)
-            "document": 0.40,
+            # Document: Cost $0.043 × 10 = $0.45 (90% margin)
+            "document": 0.45,
             
-            # Photo: Cost $0.016 × 12.5 = $0.20 (92% margin)
-            "photo": 0.20,
+            # Photo: Cost $0.015 × 10 = $0.15 (90% margin)
+            "photo": 0.15,
             
-            # Storage: Cost $0.20 × 10 = $2.00 (90% margin!)
+            # Storage: Cost $0.201 × 10 = $2.00 (90% margin)
             "storage_gb": 2.00,
         }
         
@@ -146,22 +154,16 @@ class PricingService:
         documents: int,
         photos: int,
         storage_gb: float,
-        whatsapp_messages: int = None,
     ) -> Dict[str, Any]:
-        """Calculate what WE actually pay for this usage"""
+        """Calculate what WE actually pay for this usage (all overages included)"""
         
-        # If not specified, estimate WhatsApp messages as 2x queries
-        if whatsapp_messages is None:
-            whatsapp_messages = queries * 2
-        
-        # Variable costs
-        query_cost = queries * self.COSTS["query"]
+        # Variable costs (WhatsApp is included in query cost)
+        query_cost = queries * self.COSTS["query"]  # Includes Gemini + Supermemory + WhatsApp
         document_cost = documents * self.COSTS["document"]
         photo_cost = photos * self.COSTS["photo"]
         storage_cost = storage_gb * self.COSTS["storage_gb"]
-        whatsapp_cost = whatsapp_messages * self.COSTS["whatsapp_message"]
         
-        variable_total = query_cost + document_cost + photo_cost + storage_cost + whatsapp_cost
+        variable_total = query_cost + document_cost + photo_cost + storage_cost
         
         # Total including fixed costs
         total = self.TOTAL_FIXED_COST + variable_total
@@ -175,12 +177,11 @@ class PricingService:
                 "subtotal": self.TOTAL_FIXED_COST,
             },
             "variable_costs": {
-                "queries": round(query_cost, 4),
-                "documents": round(document_cost, 4),
-                "photos": round(photo_cost, 4),
-                "storage": round(storage_cost, 4),
-                "whatsapp": round(whatsapp_cost, 4),
-                "subtotal": round(variable_total, 4),
+                "queries": round(query_cost, 2),
+                "documents": round(document_cost, 2),
+                "photos": round(photo_cost, 2),
+                "storage": round(storage_cost, 2),
+                "subtotal": round(variable_total, 2),
             },
             "total": round(total, 2),
         }
@@ -347,11 +348,10 @@ class PricingService:
         queries = users * queries_per_user
         documents = projects * docs_per_project
         photos = projects * photos_per_project
-        whatsapp_messages = queries * 2  # 2 messages per query (Q + A)
         
-        # Our costs
+        # Our costs (WhatsApp included in query cost)
         our_cost = self.calculate_our_cost(
-            queries, documents, photos, storage_gb, whatsapp_messages
+            queries, documents, photos, storage_gb
         )
         
         # Customer charges
@@ -375,7 +375,6 @@ class PricingService:
                 "documents": documents,
                 "photos": photos,
                 "storage_gb": storage_gb,
-                "whatsapp_messages": whatsapp_messages,
             },
             "our_cost": our_cost,
             "flat_fee": self.FLAT_FEE_USD,
@@ -400,7 +399,6 @@ USAGE:
 • Documents:       {sim['usage']['documents']:,}
 • Photos:          {sim['usage']['photos']:,}
 • Storage:         {sim['usage']['storage_gb']} GB
-• WhatsApp msgs:   {sim['usage']['whatsapp_messages']:,}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -414,12 +412,11 @@ Fixed:
   ─────────────────────────────
   Fixed subtotal:   ${sim['our_cost']['fixed_costs']['subtotal']:.2f}
 
-Variable:
+Variable (includes Gemini + Supermemory + WhatsApp overages):
   • Queries:        ${sim['our_cost']['variable_costs']['queries']:.2f}
   • Documents:      ${sim['our_cost']['variable_costs']['documents']:.2f}
   • Photos:         ${sim['our_cost']['variable_costs']['photos']:.2f}
   • Storage:        ${sim['our_cost']['variable_costs']['storage']:.2f}
-  • WhatsApp:       ${sim['our_cost']['variable_costs']['whatsapp']:.2f}
   ─────────────────────────────
   Variable subtotal: ${sim['our_cost']['variable_costs']['subtotal']:.2f}
 
