@@ -16,5 +16,5 @@ RUN mkdir -p logs
 # Expose port
 EXPOSE 8000
 
-# Railway uses PORT env var
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Use shell form to expand $PORT variable
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
