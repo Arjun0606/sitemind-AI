@@ -436,6 +436,57 @@ Please:
             return {"analysis": response, "status": "success"}
         except Exception as e:
             return {"analysis": f"Error: {str(e)}", "status": "error"}
+    
+    # =========================================================================
+    # HELPERS
+    # =========================================================================
+    
+    def extract_json(self, text: str) -> Optional[Dict]:
+        """
+        Extract JSON from AI response text
+        
+        Handles common cases:
+        - Pure JSON response
+        - JSON wrapped in markdown code blocks
+        - JSON with surrounding text
+        """
+        if not text:
+            return None
+        
+        # Try direct parse first
+        try:
+            return json.loads(text)
+        except:
+            pass
+        
+        # Try to find JSON in markdown code blocks
+        import re
+        
+        # Look for ```json ... ``` blocks
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except:
+                pass
+        
+        # Look for any JSON object in the text
+        json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(0))
+            except:
+                pass
+        
+        # Try to find JSON array
+        json_match = re.search(r'\[.*\]', text, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(0))
+            except:
+                pass
+        
+        return None
 
 
 # Singleton instance

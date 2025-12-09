@@ -1,514 +1,531 @@
 """
-SiteMind CORE - AI-First, Citations Always
-============================================
+SiteMind CORE - Boringly Reliable, Not Magical
+===============================================
 
-CORE PRINCIPLES:
-1. NO pattern matching - Gemini understands everything
-2. EVERY response has citations - "As discussed on Dec 2 by Rajesh..."
-3. INFO DUMP works - Send anything, it becomes searchable knowledge
-4. AI reasons through problems - Not just retrieval, actual thinking
+POSITIONING:
+"Your Senior Project Engineer sitting inside WhatsApp"
 
-HOW IT WORKS:
-1. User sends ANYTHING (text, photo, document, voice note transcript)
-2. Supermemory stores it immediately (info dump)
-3. Supermemory retrieves ALL relevant context
-4. Gemini REASONS with context and gives answer WITH CITATIONS
-5. Response shows WHERE the info came from
+WHAT WE DO (reliably):
+1. Answer drawing questions with EXACT citations
+2. Track decisions and approvals
+3. Manage RFIs
+4. Remember everything
+5. Summarize WhatsApp chaos
+6. Track drawing revisions
 
-THE MAGIC:
-- Send "column size is 450mm" → Stored forever
-- Later ask "column size?" → "450mm (shared by Rajesh on Dec 8)"
-- Send photo → AI analyzes + checks against stored specs
-- Every suggestion has reasoning + sources
+WHAT WE DON'T DO (on purpose):
+- "AI detects rebar mismatch from photo" ❌
+- "AI automatically catches all mistakes" ❌
+- Overpromise and underdeliver ❌
+
+PHILOSOPHY:
+Predictable > Magical
+Reliable > Impressive
+Cited > Hallucinated
 """
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import json
 
-from utils.logger import logger
 from services.memory_service import memory_service
 from services.gemini_service import gemini_service
+from utils.logger import logger
 
 
 class SiteMindCore:
     """
-    AI-First Construction Assistant
+    The Reliable Project Brain
     
-    NO pattern matching.
-    ALL AI understanding.
-    ALWAYS cite sources.
+    Focused on:
+    - Drawing Q&A with citations
+    - Decision logging
+    - RFI tracking
+    - Revision intelligence
+    - Daily summaries
+    
+    NOT focused on:
+    - Risky computer vision claims
+    - "Magical" AI detection
     """
     
     def __init__(self):
-        pass
-    
+        self.system_prompt = """You are SiteMind, a reliable project assistant for construction sites.
+
+YOUR ROLE:
+You are like a senior project engineer who:
+- Knows every drawing that was uploaded
+- Remembers every decision that was made
+- Tracks all RFIs and their status
+- Can find any information instantly
+
+YOUR RULES (CRITICAL):
+1. ONLY answer based on information you have in context
+2. ALWAYS cite the source: "From STR-07, Rev R2, Page 14"
+3. If information is NOT in context, say: "I don't have this information. Please upload the relevant drawing."
+4. NEVER make up specifications or details
+5. NEVER claim to "detect" things from photos - just log what the user tells you
+6. Be concise and practical - site engineers need quick answers
+
+YOUR CAPABILITIES:
+- Answer questions about drawings/specs WITH citations
+- Log decisions and approvals
+- Track RFIs
+- Remember project history
+- Summarize conversations
+
+YOUR LIMITATIONS (be honest about these):
+- You can only answer based on uploaded documents
+- You cannot "detect" issues from photos automatically
+- You are not a replacement for QA/QC
+
+RESPONSE FORMAT:
+- Keep answers short and practical
+- Always include source citation
+- If uncertain, say so clearly"""
+
     async def process_message(
         self,
         message: str,
         company_id: str,
         project_id: str,
         user_id: str,
-        user_name: str = "",
-        user_role: str = "site_engineer",
-        photo_url: str = None,
-        photo_data: bytes = None,
+        user_name: str = "User",
+        message_type: str = "text",
+        media_caption: str = None,
     ) -> Dict[str, Any]:
         """
-        Process ANY message with AI understanding and citations
-        
-        This is the ONLY entry point. Handles everything:
-        - Questions → Answered with citations
-        - Information → Stored and acknowledged  
-        - Photos → Analyzed against project context
-        - Issues → Flagged with recommendations
+        Process message with reliability over magic
         """
         
-        logger.info(f"📩 Message from {user_name or user_id}: {message[:50]}...")
+        logger.info(f"📥 Processing: {message[:50]}... from {user_name}")
         
-        # =====================================================================
-        # STEP 1: STORE IMMEDIATELY (Info Dump)
-        # Everything shared becomes searchable knowledge
-        # =====================================================================
+        # Get relevant context
+        context = await self._get_context(company_id, project_id, message)
         
-        memory_id = await self._store_incoming(
+        # Determine intent and respond
+        result = await self._process_with_context(
+            message=message,
+            context=context,
+            company_id=company_id,
+            project_id=project_id,
+            user_id=user_id,
+            user_name=user_name,
+        )
+        
+        # Store interaction
+        await self._store_interaction(
             company_id=company_id,
             project_id=project_id,
             user_id=user_id,
             user_name=user_name,
             message=message,
-            has_photo=photo_data is not None,
+            response=result.get("answer", ""),
         )
         
-        # =====================================================================
-        # STEP 2: RETRIEVE ALL RELEVANT CONTEXT
-        # Supermemory semantic search
-        # =====================================================================
-        
-        context = await self._get_context(
-            company_id=company_id,
-            project_id=project_id,
-            query=message,
-        )
-        
-        logger.info(f"🔍 Retrieved {len(context)} relevant memories")
-        
-        # =====================================================================
-        # STEP 3: AI UNDERSTANDS AND RESPONDS WITH CITATIONS
-        # Gemini does ALL the thinking
-        # =====================================================================
-        
-        if photo_data:
-            response = await self._process_with_photo(
-                message=message,
-                photo_data=photo_data,
-                context=context,
-                user_name=user_name,
-                project_id=project_id,
-            )
-        else:
-            response = await self._process_with_ai(
-                message=message,
-                context=context,
-                user_name=user_name,
-                project_id=project_id,
-            )
-        
-        # =====================================================================
-        # STEP 4: STORE THE RESPONSE TOO
-        # So future queries can reference this conversation
-        # =====================================================================
-        
-        await self._store_response(
-            company_id=company_id,
-            project_id=project_id,
-            user_id=user_id,
-            user_name=user_name,
-            question=message,
-            answer=response["answer"],
-        )
-        
-        return response
-    
-    # =========================================================================
-    # AI PROCESSING - Gemini does ALL understanding
-    # =========================================================================
-    
-    async def _process_with_ai(
-        self,
-        message: str,
-        context: List[Dict],
-        user_name: str,
-        project_id: str,
-    ) -> Dict[str, Any]:
-        """
-        Let AI understand the message and respond with citations
-        
-        NO pattern matching. AI figures out:
-        - Is this a question? → Answer with sources
-        - Is this information? → Acknowledge and confirm stored
-        - Is this an issue? → Provide recommendations with reasoning
-        - Is this a decision? → Confirm and note for records
-        """
-        
-        # Format context with metadata for citations
-        context_with_sources = self._format_context_for_citations(context)
-        
-        # THE MASTER PROMPT - AI does everything
-        prompt = f"""You are SiteMind, an AI construction expert assistant.
+        return result
 
-YOUR JOB:
-1. Understand what the user is saying/asking
-2. Use the PROJECT CONTEXT below to give accurate, helpful responses
-3. ALWAYS cite your sources - mention who said what and when
-4. If giving recommendations, explain your reasoning
-
-PROJECT CONTEXT (Information from this project):
-{context_with_sources}
-
----
-
-USER MESSAGE from {user_name}:
-{message}
-
----
-
-RESPONSE GUIDELINES:
-
-1. **If user is ASKING a question:**
-   - Answer using the context above
-   - CITE the source: "As per [person] on [date]..." or "According to [source]..."
-   - If info not in context, say so clearly and give general guidance
-
-2. **If user is SHARING information:**
-   - Acknowledge: "Noted. [summary of what you understood]"
-   - Confirm it's saved: "This has been recorded for project reference."
-   - If this CHANGES something previously recorded, flag it clearly
-
-3. **If user is REPORTING an issue:**
-   - Acknowledge the issue seriously
-   - Check if related issues exist in context
-   - Give practical recommendations with reasoning
-   - Flag if it needs escalation
-
-4. **If user is making a DECISION:**
-   - Confirm what was decided
-   - Note if this changes anything from before
-   - Remind about any approvals needed
-
-CITATION FORMAT:
-- "Column size is 450mm (confirmed by Rajesh on Dec 2)"
-- "As discussed with architect on Nov 15, use M30 concrete"
-- "Based on the drawing shared on Dec 5..."
-
-LANGUAGE:
-- Respond in the same language as the user (Hindi/Hinglish if they used it)
-- Be direct and practical - site engineers need quick, clear info
-- Use construction terminology they understand
-
-Remember: You have access to ALL project discussions. Use them. Cite them."""
-
-        try:
-            result = await gemini_service._generate(prompt)
-            
-            return {
-                "answer": result,
-                "context_used": len(context),
-                "sources": [c.get("source", "") for c in context if c.get("source")],
-            }
-            
-        except Exception as e:
-            logger.error(f"AI processing error: {e}")
-            return {
-                "answer": f"Sorry, I couldn't process that right now. Please try again.\n\nYour message has been saved: \"{message[:50]}...\"",
-                "error": str(e),
-            }
-    
-    async def _process_with_photo(
-        self,
-        message: str,
-        photo_data: bytes,
-        context: List[Dict],
-        user_name: str,
-        project_id: str,
-    ) -> Dict[str, Any]:
-        """
-        Analyze photo with AI and project context
-        """
-        
-        context_with_sources = self._format_context_for_citations(context)
-        
-        prompt = f"""Analyze this construction site photo.
-
-USER'S MESSAGE: {message}
-SENT BY: {user_name}
-
-PROJECT CONTEXT (Specifications and past discussions):
-{context_with_sources}
-
----
-
-YOUR ANALYSIS SHOULD:
-
-1. **Describe what you see** - Be specific about construction elements
-
-2. **Check against specifications** - Compare with project context above
-   - Does this match what was specified?
-   - Any deviations from approved specs?
-   - Cite the relevant specification when comparing
-
-3. **Flag any concerns** with ⚠️
-   - Quality issues
-   - Safety concerns  
-   - Deviations from specs
-   - Things that need attention
-
-4. **Give practical recommendations**
-   - What action to take
-   - Who to inform
-   - What to check
-
-CITATION FORMAT:
-- "This appears to be 10mm rebar, but specification (shared Dec 5) requires 12mm"
-- "Spacing looks like 200mm c/c, matches the approved drawing"
-
-Respond in the user's language (Hindi/Hinglish if that's what they used)."""
-
-        try:
-            result = await gemini_service.analyze_image(
-                image_data=photo_data,
-                prompt=prompt,
-            )
-            
-            return {
-                "answer": result.get("analysis", "Could not analyze the photo."),
-                "context_used": len(context),
-                "photo_analyzed": True,
-            }
-            
-        except Exception as e:
-            logger.error(f"Photo analysis error: {e}")
-            return {
-                "answer": "Sorry, I couldn't analyze this photo. Please try again.\n\nThe photo has been saved to project records.",
-                "error": str(e),
-            }
-    
-    # =========================================================================
-    # CONTEXT FORMATTING - For proper citations
-    # =========================================================================
-    
-    def _format_context_for_citations(self, context: List[Dict]) -> str:
-        """
-        Format context so AI can cite sources properly
-        
-        Each piece of context includes:
-        - The content
-        - Who shared it
-        - When
-        - What type (decision, issue, conversation, etc.)
-        """
-        
-        if not context:
-            return "(No previous project discussions found. This might be a new project or new topic.)"
-        
-        formatted = []
-        for i, item in enumerate(context, 1):
-            # Use raw_content if available (has full context), fallback to content
-            raw = item.get("raw_content", "")
-            content = item.get("content", str(item))
-            title = item.get("title", "")
-            created_at = item.get("created_at", "")
-            metadata = item.get("metadata", {})
-            
-            # Use raw content if content is empty (extraction issue)
-            if not content and raw:
-                content = raw
-            
-            # Extract source info from raw content format: [TYPE] [Project: X] [Date: Y] User: Content
-            import re
-            
-            # Try to extract user from content
-            user_match = re.search(r'(?:^|\]\s+)([A-Za-z\s]+):\s', content)
-            user = user_match.group(1).strip() if user_match else metadata.get("user_name", "Unknown")
-            
-            # Extract date from raw content or created_at
-            date_str = ""
-            date_match = re.search(r'\[Date:\s*([^\]]+)\]', raw or content)
-            if date_match:
-                date_str = date_match.group(1)
-            elif created_at:
-                try:
-                    dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                    date_str = dt.strftime("%b %d, %Y")
-                except:
-                    date_str = created_at[:10] if len(str(created_at)) > 10 else str(created_at)
-            
-            # Extract type from raw
-            type_match = re.search(r'^\[([A-Z]+)\]', raw or "")
-            mem_type = type_match.group(1) if type_match else "INFO"
-            
-            # Clean up content for display (remove metadata tags)
-            display_content = re.sub(r'\[[^\]]+\]\s*', '', content).strip()
-            if not display_content:
-                display_content = content
-            
-            # Build citation-ready format
-            source_line = f"📌 Source: {user} on {date_str}" if date_str else f"📌 Source: {user}"
-            
-            # Use title if available and content is short
-            if title and len(display_content) < 20:
-                display_content = f"{title}: {display_content}"
-            
-            formatted.append(f"{i}. {display_content}\n   {source_line}")
-        
-        return "\n\n".join(formatted)
-    
-    # =========================================================================
-    # MEMORY OPERATIONS - Store everything
-    # =========================================================================
-    
-    async def _store_incoming(
-        self,
-        company_id: str,
-        project_id: str,
-        user_id: str,
-        user_name: str,
-        message: str,
-        has_photo: bool,
-    ) -> str:
-        """
-        Store incoming message immediately (info dump)
-        
-        Everything shared becomes searchable:
-        - "Column C1 is 450mm" → Searchable spec
-        - "Architect said use M30" → Searchable decision
-        - "Crack in beam B2" → Searchable issue
-        """
-        
-        metadata = {
-            "user_id": user_id,
-            "user_name": user_name,
-            "timestamp": datetime.utcnow().isoformat(),
-            "has_photo": has_photo,
-            "type": "incoming",
-        }
-        
-        try:
-            memory = await memory_service.add_memory(
-                company_id=company_id,
-                project_id=project_id,
-                content=f"{user_name}: {message}" if user_name else message,
-                memory_type="info",
-                metadata=metadata,
-                user_id=user_id,
-            )
-            logger.info(f"💾 Stored incoming message")
-            return memory.id if hasattr(memory, 'id') else ""
-        except Exception as e:
-            logger.error(f"Failed to store incoming: {e}")
-            return ""
-    
-    async def _store_response(
-        self,
-        company_id: str,
-        project_id: str,
-        user_id: str,
-        user_name: str,
-        question: str,
-        answer: str,
-    ) -> None:
-        """
-        Store the Q&A for future reference
-        """
-        
-        content = f"Q ({user_name}): {question}\n\nA (SiteMind): {answer}"
-        
-        metadata = {
-            "user_id": user_id,
-            "user_name": user_name,
-            "timestamp": datetime.utcnow().isoformat(),
-            "type": "conversation",
-        }
-        
-        try:
-            await memory_service.add_memory(
-                company_id=company_id,
-                project_id=project_id,
-                content=content,
-                memory_type="conversation",
-                metadata=metadata,
-                user_id=user_id,
-            )
-            logger.info(f"💾 Stored conversation")
-        except Exception as e:
-            logger.error(f"Failed to store conversation: {e}")
-    
     async def _get_context(
         self,
         company_id: str,
         project_id: str,
         query: str,
-        limit: int = 10,
     ) -> List[Dict]:
-        """
-        Get all relevant context from Supermemory
-        """
-        
-        try:
-            results = await memory_service.search(
-                company_id=company_id,
-                query=query,
-                project_id=project_id,
-                limit=limit,
-            )
-            return results
-        except Exception as e:
-            logger.error(f"Context retrieval error: {e}")
-            return []
-    
-    # =========================================================================
-    # SEARCH - For dashboard and direct queries
-    # =========================================================================
-    
-    async def search(
-        self,
-        company_id: str,
-        project_id: str,
-        query: str,
-        limit: int = 20,
-    ) -> List[Dict]:
-        """
-        Search project history
-        
-        Use for:
-        - Dashboard search
-        - "Find all discussions about columns"
-        - "What decisions were made last week"
-        """
-        
-        return await self._get_context(
+        """Get relevant context from memory"""
+        return await memory_service.get_context(
             company_id=company_id,
             project_id=project_id,
             query=query,
-            limit=limit,
         )
-    
-    async def get_recent_activity(
+
+    async def _process_with_context(
+        self,
+        message: str,
+        context: List[Dict],
+        company_id: str,
+        project_id: str,
+        user_id: str,
+        user_name: str,
+    ) -> Dict[str, Any]:
+        """
+        Process with AI - focused on reliability
+        """
+        
+        # Format context clearly
+        context_text = self._format_context(context)
+        
+        prompt = f"""{self.system_prompt}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AVAILABLE PROJECT INFORMATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{context_text if context_text else "(No documents uploaded yet for this project)"}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+USER MESSAGE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+From: {user_name}
+Message: {message}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RESPOND:
+- If this is a QUESTION: Answer using ONLY the information above. Cite the source.
+- If this is INFORMATION/UPDATE: Acknowledge and confirm you've noted it.
+- If this is a DECISION: Confirm the decision is logged with who made it and when.
+- If information is NOT available: Say so clearly and ask for the relevant document.
+
+Be concise. Be reliable. Always cite sources."""
+
+        try:
+            response = await gemini_service._generate(prompt)
+            
+            # Check if this is something to store
+            store_type = self._detect_store_type(message)
+            
+            return {
+                "answer": response,
+                "context_used": len(context),
+                "store_type": store_type,
+                "status": "success",
+            }
+            
+        except Exception as e:
+            logger.error(f"Processing error: {e}")
+            return {
+                "answer": "I received your message but had trouble processing it. Please try again.",
+                "status": "error",
+                "error": str(e),
+            }
+
+    def _format_context(self, context: List[Dict]) -> str:
+        """Format context for the prompt"""
+        if not context:
+            return ""
+        
+        lines = []
+        for i, item in enumerate(context[:15], 1):  # Max 15 items
+            content = item.get("content", str(item))
+            if len(content) > 400:
+                content = content[:400] + "..."
+            
+            # Extract source info if available
+            source = ""
+            if "source" in str(item).lower():
+                source = " [has source]"
+            
+            lines.append(f"{i}. {content}{source}")
+        
+        return "\n\n".join(lines)
+
+    def _detect_store_type(self, message: str) -> Optional[str]:
+        """
+        Simple detection of what type of info this is
+        NOT for making decisions, just for categorization
+        """
+        message_lower = message.lower()
+        
+        # Decision keywords
+        if any(word in message_lower for word in ["approved", "decided", "confirmed", "agreed", "finalized"]):
+            return "decision"
+        
+        # RFI keywords
+        if any(word in message_lower for word in ["rfi", "request for", "clarification needed", "query to"]):
+            return "rfi"
+        
+        # Issue keywords
+        if any(word in message_lower for word in ["issue", "problem", "delay", "stuck", "pending"]):
+            return "issue"
+        
+        # Drawing/spec keywords
+        if any(word in message_lower for word in ["drawing", "revision", "rev ", "r1", "r2", "r3", "uploaded"]):
+            return "drawing"
+        
+        return "general"
+
+    async def _store_interaction(
         self,
         company_id: str,
         project_id: str,
-        limit: int = 20,
-    ) -> List[Dict]:
-        """
-        Get recent project activity for dashboard
-        """
+        user_id: str,
+        user_name: str,
+        message: str,
+        response: str,
+    ):
+        """Store the interaction in memory"""
         
-        return await self._get_context(
+        # Store the Q&A
+        await memory_service.add_query(
             company_id=company_id,
             project_id=project_id,
-            query="recent activity conversation decision issue",
-            limit=limit,
+            question=message,
+            answer=response[:500],
+            user_id=user_id,
         )
+
+    # =========================================================================
+    # SPECIFIC FEATURES
+    # =========================================================================
+
+    async def log_decision(
+        self,
+        company_id: str,
+        project_id: str,
+        decision: str,
+        approved_by: str,
+        user_id: str,
+        context: str = None,
+    ) -> str:
+        """
+        Log a decision with full traceability
+        """
+        timestamp = datetime.utcnow().strftime("%d-%b-%Y %H:%M")
+        
+        decision_record = f"""DECISION LOGGED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Decision: {decision}
+Approved by: {approved_by}
+Date/Time: {timestamp}
+{f"Context: {context}" if context else ""}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+        await memory_service.add_decision(
+            company_id=company_id,
+            project_id=project_id,
+            decision=decision,
+            approved_by=approved_by,
+            user_id=user_id,
+        )
+        
+        return f"""✅ *Decision Logged*
+
+{decision}
+
+📋 Approved by: {approved_by}
+🕐 Time: {timestamp}
+
+_This decision is now part of the project record._"""
+
+    async def log_rfi(
+        self,
+        company_id: str,
+        project_id: str,
+        rfi_description: str,
+        raised_by: str,
+        assigned_to: str,
+        user_id: str,
+        due_date: str = None,
+    ) -> str:
+        """
+        Log an RFI
+        """
+        timestamp = datetime.utcnow().strftime("%d-%b-%Y")
+        rfi_id = f"RFI-{datetime.utcnow().strftime('%Y%m%d%H%M')}"
+        
+        rfi_record = f"""RFI: {rfi_description}
+ID: {rfi_id}
+Raised by: {raised_by}
+Assigned to: {assigned_to}
+Date: {timestamp}
+Due: {due_date or 'Not specified'}
+Status: OPEN"""
+
+        await memory_service.add_memory(
+            company_id=company_id,
+            project_id=project_id,
+            content=rfi_record,
+            memory_type="rfi",
+            metadata={
+                "rfi_id": rfi_id,
+                "status": "open",
+                "assigned_to": assigned_to,
+                "raised_by": raised_by,
+            },
+            user_id=user_id,
+        )
+        
+        return f"""📋 *RFI Logged*
+
+*{rfi_id}*
+{rfi_description}
+
+👤 Raised by: {raised_by}
+👤 Assigned to: {assigned_to}
+📅 Due: {due_date or 'Not specified'}
+🔴 Status: OPEN
+
+_SiteMind will track this RFI._"""
+
+    async def log_drawing(
+        self,
+        company_id: str,
+        project_id: str,
+        drawing_name: str,
+        revision: str,
+        uploaded_by: str,
+        user_id: str,
+        changes: str = None,
+    ) -> str:
+        """
+        Log a drawing upload with revision tracking
+        """
+        timestamp = datetime.utcnow().strftime("%d-%b-%Y %H:%M")
+        
+        # Check for previous revisions
+        existing = await memory_service.search(
+            company_id=company_id,
+            project_id=project_id,
+            query=f"drawing {drawing_name}",
+            limit=5,
+        )
+        
+        previous_revisions = []
+        for item in existing:
+            content = item.get("content", "")
+            if drawing_name.lower() in content.lower() and "revision" in content.lower():
+                previous_revisions.append(content[:100])
+        
+        drawing_record = f"""DRAWING: {drawing_name}
+Revision: {revision}
+Uploaded by: {uploaded_by}
+Date: {timestamp}
+Changes: {changes or 'Not specified'}"""
+
+        await memory_service.add_memory(
+            company_id=company_id,
+            project_id=project_id,
+            content=drawing_record,
+            memory_type="drawing",
+            metadata={
+                "drawing_name": drawing_name,
+                "revision": revision,
+                "uploaded_by": uploaded_by,
+            },
+            user_id=user_id,
+        )
+        
+        response = f"""📐 *Drawing Logged*
+
+*{drawing_name}* - Revision {revision}
+
+👤 Uploaded by: {uploaded_by}
+📅 Date: {timestamp}
+{f"📝 Changes: {changes}" if changes else ""}"""
+
+        if previous_revisions:
+            response += f"""
+
+⚠️ *Previous Revisions Found:*
+This drawing has {len(previous_revisions)} previous version(s) in the system."""
+        
+        return response
+
+    async def get_daily_summary(
+        self,
+        company_id: str,
+        project_id: str,
+    ) -> str:
+        """
+        Generate a clean daily summary
+        """
+        
+        # Get recent activity
+        context = await memory_service.get_context(
+            company_id=company_id,
+            project_id=project_id,
+            query="today's updates decisions issues",
+        )
+        
+        if not context:
+            return """📊 *Daily Summary*
+
+No activity recorded today.
+
+_Send updates, decisions, or issues to SiteMind to track them._"""
+        
+        # Let AI summarize
+        prompt = f"""Summarize this project activity into a clean daily summary.
+
+ACTIVITY:
+{self._format_context(context[:10])}
+
+FORMAT YOUR RESPONSE AS:
+📊 *Daily Summary*
+
+*Decisions Made:*
+- [list any decisions]
+
+*Issues Reported:*
+- [list any issues]
+
+*RFIs:*
+- [list any RFIs and their status]
+
+*Drawings Updated:*
+- [list any drawing changes]
+
+*Pending Items:*
+- [list anything that needs attention]
+
+Keep it concise and actionable."""
+
+        try:
+            summary = await gemini_service._generate(prompt)
+            return summary
+        except Exception as e:
+            logger.error(f"Summary error: {e}")
+            return f"📊 *Daily Summary*\n\n{len(context)} items recorded today.\n\n_Ask me specific questions to get details._"
+
+    async def check_drawing_revision(
+        self,
+        company_id: str,
+        project_id: str,
+        drawing_name: str,
+    ) -> str:
+        """
+        Check latest revision of a drawing
+        """
+        
+        results = await memory_service.search(
+            company_id=company_id,
+            project_id=project_id,
+            query=f"drawing {drawing_name} revision",
+            limit=10,
+        )
+        
+        if not results:
+            return f"""📐 *Drawing Check: {drawing_name}*
+
+❌ No records found for this drawing.
+
+_Upload the drawing to SiteMind to start tracking revisions._"""
+        
+        # Parse revisions from results
+        prompt = f"""From these records, extract the drawing revision history:
+
+RECORDS:
+{self._format_context(results)}
+
+RESPOND WITH:
+📐 *{drawing_name} - Revision History*
+
+Latest: [revision number]
+Uploaded: [date]
+By: [person]
+
+Previous versions:
+- [list previous revisions if any]
+
+If you can't find clear revision info, say so."""
+
+        try:
+            response = await gemini_service._generate(prompt)
+            return response
+        except:
+            return f"""📐 *Drawing Check: {drawing_name}*
+
+Found {len(results)} record(s) related to this drawing.
+
+_Ask me a specific question about this drawing._"""
 
 
 # Singleton

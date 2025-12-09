@@ -1,34 +1,34 @@
 """
-SiteMind WhatsApp Webhook Router
-The heart of the product - handles all user interactions
+SiteMind WhatsApp Router - 100% AI-POWERED
+===========================================
 
-Every message is an opportunity to deliver value.
+ZERO commands. ZERO pattern matching.
+Just talk naturally - AI understands everything.
+
+User just speaks naturally:
+- "What is the column size at B2?"
+- "Client approved marble flooring, extra 4L"
+- "Spoke to architect, he said use 12mm rebar"
+- "There's a leak in unit 1204"
+- "Show me today's summary"
+- "What RFIs are pending?"
+
+AI understands intent and responds appropriately.
 """
 
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 from datetime import datetime
-import httpx
-import re
 
 from services import (
-    gemini_service,
-    memory_service,
     whatsapp_service,
-    storage_service,
+    memory_engine,
+    awareness_engine,
+    intelligence_engine,
     billing_service,
-    wow_service,
-    intelligence_service,
-    daily_brief_service,
-    report_service,
     project_manager,
-    command_handler,
-    alert_service,
-    leakage_prevention_service,
-    office_sync_service,
-    sitemind_core,
-    document_ingestion_service,
-    watchdog_service,
+    memory_service,
+    gemini_service,
 )
 from database import db
 from utils.logger import logger
@@ -36,588 +36,394 @@ from utils.logger import logger
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 
 
+# =============================================================================
+# MAIN WEBHOOK - 100% AI DRIVEN
+# =============================================================================
+
 @router.post("/webhook")
 async def whatsapp_webhook(request: Request):
     """
-    Handle incoming WhatsApp messages from Twilio
+    Main webhook handler - ALL messages go through AI
     
-    This is where the magic happens.
+    NO commands. NO pattern matching.
+    AI determines intent and takes appropriate action.
     """
-    # Parse form data
+    
     form = await request.form()
     data = dict(form)
-    
-    # Parse message
     message = whatsapp_service.parse_incoming(data)
     
     phone = message["from"]
-    body = message["body"]
+    body = message["body"].strip()
     num_media = message["num_media"]
     
-    logger.info(f"📥 WhatsApp from {phone}: {body[:50]}...")
+    logger.info(f"📥 {phone}: {body[:50]}...")
     
     try:
-        # Get or create user
+        # Get user
         user = await db.get_user_by_phone(phone)
         
         if not user:
-            # Unknown user - send welcome
-            await whatsapp_service.send_message(
-                phone,
-                "👋 Welcome! You're not registered with SiteMind yet.\n\nPlease contact your company admin to get access, or visit sitemind.ai to sign up."
-            )
+            await whatsapp_service.send_message(phone, get_welcome_message())
             return PlainTextResponse("OK")
         
-        # Get company info
-        company = await db.get_company(user["company_id"])
-        company_id = company["id"] if company else user["company_id"]
-        company_name = company["name"] if company else "Company"
+        # Context
+        company_id = user.get("company_id", "default")
         user_id = user.get("id", phone)
+        user_name = user.get("name", "User")
         
-        # Update user activity
+        current_project = project_manager.get_current_project(user_id, company_id)
+        project_id = current_project.id if current_project else "default"
+        project_name = current_project.name if current_project else "Project"
+        
         await db.update_user_activity(user_id)
         
-        # Get current project
-        current_project = project_manager.get_current_project(user_id, company_id)
-        project_id = current_project.id if current_project else None
-        project_name = current_project.name if current_project else "Default"
-        
-        # Track daily activity
-        daily_brief_service.track_user(project_id or company_id, user_id)
-        
-        # =====================================================================
-        # HANDLE COMMANDS
-        # =====================================================================
-        
-        cmd, args = command_handler.parse(body)
-        
-        if cmd:
-            response = await handle_command(
-                cmd, args, phone, user_id, company_id, company_name, 
-                project_id, project_name, current_project
-            )
-            if response:
-                await whatsapp_service.send_message(phone, response)
-                return PlainTextResponse("OK")
-        
-        # =====================================================================
-        # HANDLE MEDIA
-        # =====================================================================
+        # =====================================================
+        # MEDIA HANDLING - AI processes everything
+        # =====================================================
         
         if num_media > 0:
-            await handle_media(phone, message, company_id, user_id, project_id)
+            response = await process_media_with_ai(
+                phone, message, user_id, user_name, company_id, project_id
+            )
+            await whatsapp_service.send_message(phone, response)
             return PlainTextResponse("OK")
         
-        # =====================================================================
-        # HANDLE QUERY
-        # =====================================================================
+        # =====================================================
+        # TEXT MESSAGE - 100% AI PROCESSING
+        # =====================================================
         
-        await handle_query(
-            phone, body, company_id, user_id, company_name,
-            project_id, project_name
+        response = await process_message_with_ai(
+            body, user_name, user_id, company_id, project_id, project_name
         )
         
+        billing_service.track_query(company_id)
+        
+        await whatsapp_service.send_message(phone, response)
         return PlainTextResponse("OK")
         
     except Exception as e:
         logger.error(f"Webhook error: {e}")
-        await whatsapp_service.send_alert(
-            phone,
-            "error",
-            "Sorry, something went wrong. Please try again."
-        )
+        await whatsapp_service.send_message(phone, "Something went wrong. Please try again.")
         return PlainTextResponse("OK")
 
 
 # =============================================================================
-# COMMAND HANDLER
+# AI PROCESSING - THE HEART OF SITEMIND
 # =============================================================================
 
-async def handle_command(
-    cmd: str,
-    args: dict,
-    phone: str,
+async def process_message_with_ai(
+    message: str,
+    user_name: str,
     user_id: str,
     company_id: str,
-    company_name: str,
     project_id: str,
     project_name: str,
-    current_project,
 ) -> str:
-    """Handle command and return response"""
-    
-    # Help
-    if cmd in ["help", "_cmd_hello"]:
-        return command_handler._cmd_help()
-    
-    # Projects list
-    if cmd in ["projects", "_cmd_projects"]:
-        return project_manager.format_project_list(company_id)
-    
-    # Current project
-    if cmd in ["project", "_cmd_current_project"]:
-        if current_project:
-            return project_manager.format_current_project(current_project)
-        return "No project selected. Type 'projects' to see your projects."
-    
-    # Switch project
-    if cmd == "_cmd_switch":
-        match = args.get("match")
-        if match:
-            project_name_to_switch = match.group(1)
-            project = project_manager.switch_project(user_id, company_id, project_name_to_switch)
-            if project:
-                return project_manager.format_switch_success(project)
-            return f"❌ Project '{project_name_to_switch}' not found. Type 'projects' to see available projects."
-    
-    # Status
-    if cmd in ["status", "_cmd_status"]:
-        return billing_service.get_usage_summary(company_id)
-    
-    # ROI
-    if cmd in ["roi", "_cmd_roi"]:
-        return wow_service.format_week1_report(company_id, company_name)
-    
-    # Report - Leakage Prevention Report (THE KEY REPORT)
-    if cmd in ["report", "week", "leakage", "_cmd_report"]:
-        report = watchdog_service.generate_weekly_report(
-            company_id=company_id,
-            company_name=company_name,
-        )
-        return watchdog_service.format_weekly_report(report)
-    
-    # Open items
-    if cmd in ["open", "pending", "items", "_cmd_open"]:
-        return watchdog_service.format_open_items_summary(company_id)
-    
-    # Brief
-    if cmd in ["brief", "_cmd_brief"]:
-        brief = daily_brief_service.generate_brief(
-            project_id or company_id,
-            project_name or company_name,
-        )
-        return daily_brief_service.format_brief_whatsapp(brief)
-    
-    # Team
-    if cmd in ["team", "_cmd_team"]:
-        users = await db.get_company_users(company_id)
-        if not users:
-            return "No team members found."
-        
-        msg = f"👥 *{company_name} Team*\n\n"
-        for u in users:
-            role_icon = {"admin": "👑", "pm": "📊", "site_engineer": "🔧"}.get(u.get("role", ""), "👤")
-            msg += f"{role_icon} {u.get('name', 'Unknown')} - {u.get('phone', '')}\n"
-        
-        msg += "\n_To add: 'add +91xxx Name'_"
-        return msg
-    
-    # Search
-    if cmd == "_cmd_search":
-        match = args.get("match")
-        if match:
-            query = match.group(1)
-            results = await memory_service.search(
-                company_id=company_id,
-                query=query,
-                project_id=project_id,
-                limit=5,
-            )
-            
-            if not results:
-                return f"🔍 No results found for '{query}'"
-            
-            msg = f"🔍 *Search Results for '{query}'*\n\n"
-            for i, r in enumerate(results, 1):
-                content = r.get("content", str(r))[:100]
-                msg += f"{i}. {content}...\n\n"
-            
-            return msg
-    
-    return None  # Not a handled command
-
-
-# =============================================================================
-# QUERY HANDLER
-# =============================================================================
-
-async def handle_query(
-    phone: str,
-    question: str,
-    company_id: str,
-    user_id: str,
-    company_name: str,
-    project_id: str,
-    project_name: str,
-):
     """
-    Handle text query - THE COMPLETE EXPERIENCE
+    Process ANY message with AI - no pattern matching
     
-    1. Watchdog analyzes for leakages (change orders, decisions, issues)
-    2. SiteMind Core provides AI response with citations
-    3. Everything is tracked and logged
+    AI determines:
+    1. What is the user's INTENT?
+    2. What ACTION should be taken?
+    3. What RESPONSE should be given?
     """
     
-    # Track for billing
-    billing_service.track_query(company_id, company_name)
-    daily_brief_service.track_query(project_id or company_id)
-    
-    # Get user info
-    user = await db.get_user_by_phone(phone)
-    user_name = user.get("name", "") if user else ""
-    
-    # =========================================================================
-    # WATCHDOG - Analyze for leakages FIRST
-    # =========================================================================
-    watchdog_result = watchdog_service.analyze_message(
-        message=question,
-        company_id=company_id,
-        project_id=project_id or "default",
-        user_id=user_id,
-        user_name=user_name,
-    )
-    
-    # =========================================================================
-    # SITEMIND CORE - AI response with citations
-    # =========================================================================
-    result = await sitemind_core.process_message(
-        message=question,
-        company_id=company_id,
-        project_id=project_id or "default",
-        user_id=user_id,
-        user_name=user_name,
-    )
-    
-    answer = result.get("answer", "Sorry, I couldn't process that.")
-    context_used = result.get("context_used", 0)
-    
-    # =========================================================================
-    # ADD WATCHDOG DETECTIONS TO RESPONSE
-    # =========================================================================
-    if watchdog_result.get("response_additions"):
-        for addition in watchdog_result["response_additions"]:
-            answer += f"\n{addition}"
-    
-    # Track memory recall (WOW moment!)
-    if context_used > 0:
-        wow_service.track_memory_recall(user_id, company_id)
-    
-    # Track for office sync
-    office_sync_service.track_query(
-        project_id=project_id or "default",
-        company_id=company_id,
-        question=question,
-        user_id=user_id,
-    )
-    
-    # Track code references
-    has_code_ref = any(code in answer.lower() for code in ["is ", "is:", "nbc", "code", "clause"])
-    wow_service.track_query(user_id, company_id, had_code_reference=has_code_ref)
-    
-    # Add project indicator
-    if project_name and project_name != "Default":
-        answer += f"\n\n🏗️ _{project_name}_"
-    
-    # Log to database
-    await db.log_query(
+    # Get project context from memory
+    context = await memory_service.get_context(
         company_id=company_id,
         project_id=project_id,
+        query=message,
         user_id=user_id,
-        question=question,
-        answer=answer,
     )
     
-    # Send response
-    await whatsapp_service.send_answer(phone, question, answer)
+    # AI determines intent and generates response
+    prompt = f"""You are SiteMind, an AI assistant for construction project management.
+
+PROJECT: {project_name}
+USER: {user_name}
+MESSAGE: {message}
+
+RELEVANT PROJECT CONTEXT:
+{context if context else "No previous context stored yet."}
+
+YOUR JOB:
+1. Understand what the user wants
+2. Take the appropriate action
+3. Give a helpful, natural response
+
+INTENT CATEGORIES (detect automatically):
+- QUESTION: User is asking for information → Search memory and answer with citations
+- DECISION: User is communicating a decision/approval → Log it and confirm
+- PHONE_CALL: User is logging a phone conversation → Log it with details
+- RFI: User is asking for clarification that needs expert response → Create RFI
+- ISSUE: User is reporting a problem → Log the issue
+- PROGRESS: User is sharing work completion update → Record progress
+- SUMMARY_REQUEST: User wants a summary → Generate summary
+- RFI_STATUS: User wants to know pending RFIs → List them
+- ISSUE_STATUS: User wants to know open issues → List them
+- RISK_STATUS: User wants to know risks → Show risks
+- REPORT_REQUEST: User wants a report → Generate report
+- GENERAL: General conversation or update → Store and acknowledge
+
+IMPORTANT RULES:
+1. ALWAYS be helpful and conversational
+2. For QUESTIONS: Answer with specific citations (drawing name, date, who said it)
+3. For DECISIONS: Confirm the decision was logged with full details
+4. For ISSUES: Acknowledge and note severity
+5. For SUMMARIES/REPORTS: Generate comprehensive summaries
+6. Never ask user to use commands or specific formats
+7. Respond in the same language the user used (English/Hindi/Hinglish)
+
+NOW RESPOND TO THE USER:"""
+
+    # Call AI
+    ai_response = await gemini_service.query(prompt)
+    
+    # Also process in background for storage and detection
+    await process_for_storage(message, user_name, user_id, company_id, project_id, ai_response)
+    
+    return ai_response
 
 
-# =============================================================================
-# MEDIA HANDLER
-# =============================================================================
+async def process_for_storage(
+    message: str,
+    user_name: str,
+    user_id: str,
+    company_id: str,
+    project_id: str,
+    ai_response: str,
+):
+    """
+    Background processing - AI determines what to store
+    """
+    
+    # Have AI classify and extract
+    classification_prompt = f"""Analyze this message and extract structured information.
 
-async def handle_media(
+MESSAGE: {message}
+FROM: {user_name}
+
+Return JSON with:
+{{
+    "intent": "question|decision|phone_call|rfi|issue|progress|summary_request|general",
+    "should_store": true/false,
+    "decision_content": "if decision, what was decided",
+    "issue_content": "if issue, what is the problem",
+    "issue_severity": "high|medium|low",
+    "issue_location": "location if mentioned",
+    "progress_work": "if progress, what work",
+    "progress_location": "where",
+    "progress_status": "status",
+    "financial_amount": "if any amount mentioned in rupees",
+    "people_mentioned": ["names mentioned"],
+    "key_information": "most important info to remember"
+}}
+
+Only return valid JSON, nothing else."""
+
+    try:
+        classification = await gemini_service.query(classification_prompt)
+        data = gemini_service.extract_json(classification)
+        
+        if not data:
+            # If JSON extraction failed, just store as general message
+            data = {"intent": "general", "should_store": True}
+        
+        intent = data.get("intent", "general")
+        
+        # Store based on intent
+        if intent == "decision" and data.get("decision_content"):
+            await memory_engine.log_decision(
+                data["decision_content"],
+                user_name,
+                company_id,
+                project_id,
+            )
+        
+        elif intent == "issue" and data.get("issue_content"):
+            await awareness_engine.detect_issue(
+                message, user_name, company_id, project_id
+            )
+        
+        elif intent == "progress" and data.get("progress_work"):
+            await awareness_engine.detect_progress(
+                message, user_name, company_id, project_id
+            )
+        
+        elif intent == "rfi":
+            await memory_engine.create_rfi(
+                title=message[:50],
+                question=message,
+                raised_by=user_name,
+                company_id=company_id,
+                project_id=project_id,
+            )
+        
+        elif intent == "phone_call":
+            await memory_engine.log_decision(
+                f"📞 Phone call: {message}",
+                user_name,
+                company_id,
+                project_id,
+            )
+        
+        # Always store the message in memory (except summary requests)
+        if data.get("should_store", True) and intent not in ["summary_request", "rfi_status", "issue_status", "risk_status", "report_request"]:
+            await memory_service.add_memory(
+                company_id=company_id,
+                project_id=project_id,
+                content=f"{user_name}: {message}",
+                memory_type=intent,
+                metadata={
+                    "user": user_name,
+                    "financial_amount": data.get("financial_amount"),
+                    "people_mentioned": data.get("people_mentioned"),
+                    "key_information": data.get("key_information"),
+                },
+                user_id=user_id,
+            )
+        
+        # Detect approvers
+        await awareness_engine.detect_approver(message, user_name, company_id, project_id)
+        
+    except Exception as e:
+        logger.error(f"Storage processing error: {e}")
+
+
+async def process_media_with_ai(
     phone: str,
     message: dict,
-    company_id: str,
     user_id: str,
+    user_name: str,
+    company_id: str,
     project_id: str,
-):
-    """Handle media messages (photos, documents)"""
+) -> str:
+    """
+    Process media uploads with AI understanding
+    """
+    from services.storage_service import storage_service
+    import httpx
     
-    for i, (url, mime_type) in enumerate(zip(message["media_urls"], message["media_types"])):
+    caption = message.get("body", "").strip()
+    responses = []
+    
+    for url, mime_type in zip(message.get("media_urls", []), message.get("media_types", [])):
         if not url:
             continue
         
         try:
-            # Download media
             async with httpx.AsyncClient() as client:
-                auth = (
-                    whatsapp_service.account_sid,
-                    whatsapp_service.auth_token,
-                )
+                auth = (whatsapp_service.account_sid, whatsapp_service.auth_token)
                 response = await client.get(url, auth=auth, timeout=60.0)
                 
                 if response.status_code != 200:
-                    logger.error(f"Failed to download media: {response.status_code}")
                     continue
                 
                 content = response.content
             
-            # Determine type
-            is_image = mime_type and mime_type.startswith("image/")
-            is_document = mime_type and (
-                mime_type.startswith("application/pdf") or
-                "document" in mime_type.lower()
-            )
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            file_name = caption or f"file_{timestamp}"
             
-            if is_image:
-                await handle_image(
-                    phone, content, mime_type, message["body"],
-                    company_id, user_id, project_id, i
+            # PDF/Document
+            if "pdf" in mime_type or "document" in mime_type:
+                # Store
+                await storage_service.upload_document(
+                    file_content=content,
+                    file_name=f"{file_name}.pdf",
+                    content_type=mime_type,
+                    company_id=company_id,
+                    project_id=project_id,
                 )
+                
+                # Extract with AI
+                drawing = await memory_engine.extract_drawing_info(
+                    document_text=f"Drawing: {file_name}",
+                    file_name=file_name,
+                    company_id=company_id,
+                    project_id=project_id,
+                    uploaded_by=user_name,
+                )
+                
+                billing_service.track_document(company_id)
+                
+                responses.append(f"""📄 *{file_name}* stored!
+
+Uploaded by: {user_name}
+Date: {datetime.utcnow().strftime('%d-%b-%Y %H:%M')}
+
+I'll remember this file. Ask me "send latest {file_name.split('.')[0]}" anytime to get it back.""")
             
-            elif is_document:
-                await handle_document(
-                    phone, content, mime_type,
-                    company_id, user_id, project_id, i
+            # Image
+            elif mime_type.startswith("image/"):
+                await storage_service.upload_photo(
+                    file_content=content,
+                    file_name=f"{file_name}.jpg",
+                    content_type=mime_type,
+                    company_id=company_id,
+                    project_id=project_id,
                 )
+                
+                # Store in memory with caption context
+                await memory_service.add_memory(
+                    company_id=company_id,
+                    project_id=project_id,
+                    content=f"Photo uploaded by {user_name}: {caption or 'Site photo'}",
+                    memory_type="photo",
+                    metadata={"caption": caption, "uploaded_by": user_name},
+                    user_id=user_id,
+                )
+                
+                billing_service.track_photo(company_id)
+                
+                responses.append(f"📷 Photo saved.{f' Caption: {caption}' if caption else ''}")
             
             else:
-                await whatsapp_service.send_message(
-                    phone,
-                    f"📎 Received file (type: {mime_type}). I can analyze images and PDFs."
-                )
-        
+                responses.append("📎 File received and stored.")
+                
         except Exception as e:
-            logger.error(f"Media handling error: {e}")
-            await whatsapp_service.send_message(
-                phone,
-                f"❌ Error processing file: {str(e)}"
-            )
+            logger.error(f"Media error: {e}")
+            responses.append("Couldn't process one of the files.")
+    
+    return "\n\n".join(responses) if responses else "Received your files."
 
 
-async def handle_image(
-    phone: str,
-    content: bytes,
-    mime_type: str,
-    caption: str,
-    company_id: str,
-    user_id: str,
-    project_id: str,
-    index: int,
-):
-    """
-    Handle image - site photos, drawings, etc.
-    
-    DUMP EVERYTHING approach:
-    1. User sends any image via WhatsApp
-    2. If it's a drawing → ingest it
-    3. If it's a photo → analyze with context
-    4. Store everything in memory
-    """
-    
-    # Track for billing + WOW
-    billing_service.track_photo(company_id)
-    wow_service.track_photo(user_id, company_id)
-    daily_brief_service.track_photo(project_id or company_id)
-    
-    # Get user info
-    user = await db.get_user_by_phone(phone)
-    user_name = user.get("name", "") if user else ""
-    
-    # Check if this looks like a drawing (based on caption)
-    is_drawing = False
-    if caption:
-        caption_lower = caption.lower()
-        if any(word in caption_lower for word in ['drawing', 'plan', 'layout', 'detail', 'section', 'elevation']):
-            is_drawing = True
-    
-    if is_drawing:
-        # Treat as drawing - ingest it
-        filename = f"drawing_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.png"
-        
-        await whatsapp_service.send_message(phone, "📐 Processing drawing...")
-        
-        doc = await document_ingestion_service.ingest_document(
-            company_id=company_id,
-            project_id=project_id or "default",
-            filename=filename,
-            file_data=content,
-            doc_type=document_ingestion_service.DocumentType.DRAWING,
-            uploaded_by=user_name or user_id,
-        )
-        
-        analysis_text = f"""*Drawing Analyzed & Stored*
+# =============================================================================
+# MESSAGES
+# =============================================================================
 
-📐 {doc.filename}
-🔍 {len(doc.memory_ids)} searchable chunks
+def get_welcome_message() -> str:
+    return """👋 *Welcome to SiteMind*
 
-{doc.summary[:300] if doc.summary else 'Drawing processed'}
+I'm your project's memory. I help you:
 
-_Ask me anything about this drawing!_"""
-    
-    else:
-        # Regular photo - use sitemind_core for analysis with context
-        result = await sitemind_core.process_message(
-            message=caption or "Analyze this site photo",
-            company_id=company_id,
-            project_id=project_id or "default",
-            user_id=user_id,
-            user_name=user_name,
-            photo_data=content,
-        )
-        
-        analysis_text = result.get("answer", "Could not analyze image.")
-    
-    # Safety check on analysis
-    safety = await intelligence_service.analyze_safety(
-        image_analysis=analysis_text,
-        project_id=project_id,
-    )
-    
-    if not safety["is_safe"]:
-        analysis_text += "\n\n⚠️ *Safety Concerns Detected:*"
-        for issue in safety["issues"][:3]:
-            analysis_text += f"\n• {issue}"
-        
-        wow_service.track_safety_flag(user_id, company_id)
-        daily_brief_service.track_safety_flag(project_id or company_id)
-    
-    # Store photo
-    upload = await storage_service.upload_photo(
-        file_content=content,
-        file_name=f"photo_{index}.jpg",
-        content_type=mime_type,
-        company_id=company_id,
-        project_id=project_id,
-    )
-    
-    # Store in memory
-    await memory_service.add_photo_analysis(
-        company_id=company_id,
-        project_id=project_id or "default",
-        caption=caption or "",
-        analysis=analysis_text,
-        file_path=upload.get("path"),
-        photo_type=analysis_type,
-        user_id=user_id,
-    )
-    
-    # Log to database
-    await db.log_photo(
-        company_id=company_id,
-        project_id=project_id,
-        user_id=user_id,
-        file_path=upload.get("path", ""),
-        file_size_bytes=len(content),
-        caption=caption,
-        analysis=analysis_text,
-    )
-    
-    # Send analysis
-    await whatsapp_service.send_analysis(phone, "photo", analysis_text)
+• Remember every decision and approval
+• Track issues and RFIs
+• Store and manage drawings
+• Generate summaries
+
+*To get started*, ask your admin to add you to a project.
+
+Once added, just chat normally - I understand and remember everything.
+
+Try:
+• "Who approved the tile change?"
+• "What was decided about balcony?"
+• "Show me today's summary"
+• "What RFIs are pending?"
+
+_Everything you share becomes searchable forever._"""
 
 
-async def handle_document(
-    phone: str,
-    content: bytes,
-    mime_type: str,
-    company_id: str,
-    user_id: str,
-    project_id: str,
-    index: int,
-):
-    """
-    Handle document upload - PDF, drawings, specs, etc.
-    
-    DUMP EVERYTHING approach:
-    1. User sends any document via WhatsApp
-    2. We process it with Gemini
-    3. Store in Supermemory
-    4. Now AI can answer questions about it!
-    """
-    
-    # Track for billing
-    billing_service.track_document(company_id)
-    daily_brief_service.track_document(project_id or company_id)
-    
-    # Get user info for citation
-    user = await db.get_user_by_phone(phone)
-    user_name = user.get("name", "") if user else ""
-    
-    # Determine filename from mime type
-    ext = "pdf"
-    if "image" in mime_type:
-        ext = "png"
-    filename = f"upload_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{index}.{ext}"
-    
-    # Send processing message
-    await whatsapp_service.send_message(
-        phone,
-        f"📄 Processing document... ({len(content) / 1024:.1f} KB)"
-    )
-    
-    try:
-        # INGEST THE DOCUMENT - This is the magic!
-        doc = await document_ingestion_service.ingest_document(
-            company_id=company_id,
-            project_id=project_id or "default",
-            filename=filename,
-            file_data=content,
-            uploaded_by=user_name or user_id,
-        )
-        
-        # Store in Supabase too
-        upload = await storage_service.upload_document(
-            file_content=content,
-            file_name=filename,
-            content_type=mime_type,
-            company_id=company_id,
-            project_id=project_id,
-        )
-        
-        # Log to database
-        await db.log_document(
-            company_id=company_id,
-            project_id=project_id,
-            user_id=user_id,
-            name=filename,
-            file_path=upload.get("path", ""),
-            file_type=mime_type,
-            file_size_bytes=len(content),
-        )
-        
-        # Build response with what we found
-        summary = doc.summary[:200] if doc.summary else "Document processed"
-        key_count = len(doc.key_info)
-        chunks = len(doc.memory_ids)
-        
-        await whatsapp_service.send_message(
-            phone,
-            f"""✅ *Document Ingested!*
-
-📄 {filename}
-📊 {chunks} searchable chunks created
-🔍 {key_count} key items extracted
-
-*Summary:*
-{summary}...
-
-━━━━━━━━━━━━━━━━━━━━━━
-
-_Now ask me anything about this document!_
-_Example: "What does the drawing say about column sizes?"_"""
-        )
-        
-    except Exception as e:
-        logger.error(f"Document ingestion error: {e}")
-        await whatsapp_service.send_message(
-            phone,
-            f"❌ Error processing document: {str(e)}\n\nThe file was saved but couldn't be analyzed."
-        )
-
+# =============================================================================
+# ENDPOINTS
+# =============================================================================
 
 @router.get("/webhook")
-async def verify_webhook(request: Request):
-    """Verify webhook for Twilio"""
-    return PlainTextResponse("OK")
+async def verify():
+    return PlainTextResponse("SiteMind Active")
+
+
+@router.get("/health")
+async def health():
+    return {"status": "ok"}

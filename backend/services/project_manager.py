@@ -102,6 +102,10 @@ class ProjectManager:
         """Get all projects for a company"""
         return list(self._projects.get(company_id, {}).values())
     
+    def list_projects(self, company_id: str) -> List[Project]:
+        """Alias for get_company_projects"""
+        return self.get_company_projects(company_id)
+    
     def get_active_projects(self, company_id: str) -> List[Project]:
         """Get active projects only"""
         return [

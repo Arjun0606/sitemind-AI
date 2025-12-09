@@ -1,214 +1,201 @@
-# 🏗️ SiteMind
+# 🧠 SiteMind - Your Project Brain
 
-**AI-powered construction site management via WhatsApp**
-
-> Your construction site's AI brain - every blueprint, every decision, every query answered instantly.
-
----
-
-## 💰 Pricing
-
-```
-$500/month flat + usage
-```
-
-**Included:**
-- ✅ Unlimited users
-- ✅ Unlimited projects
-- ✅ 500 queries/month
-- ✅ 20 documents/month
-- ✅ 100 photos/month
-- ✅ 10 GB storage
-
-**Usage (when you exceed limits):**
-- Query: $0.15
-- Document: $2.50
-- Photo: $0.50
-- Storage: $1.00/GB
+> **Connected Intelligence for Construction**
+> 
+> Cross-reference everything. Catch every expensive mistake.
 
 ---
 
-## 🚀 Quick Start
+## What is SiteMind?
 
-### 1. Clone & Install
+SiteMind is an AI-powered construction assistant that:
+
+- **Stores everything** - Every drawing, decision, photo, and conversation
+- **Connects everything** - AI cross-references photos against specs
+- **Catches everything** - Mismatches detected before they become expensive
+
+**Result:** ₹10-30 lakh saved per month by catching rework before it happens.
+
+---
+
+## How It Works
+
+```
+1. UPLOAD SPECS
+   Site engineer sends drawing PDF via WhatsApp
+   AI extracts: "Column B2: 450mm, 12mm rebar @ 150mm"
+   
+2. SEND SITE PHOTO  
+   Engineer takes photo of Column B2 rebar
+   AI sees: "10mm rebar @ 200mm spacing"
+   
+3. MISMATCH CAUGHT!
+   ⚠️ "Photo shows 10mm @ 200mm"
+   📐 "Spec says 12mm @ 150mm"
+   💰 "Fix now or ₹4-5 lakh rework"
+
+4. VALUE DELIVERED
+   Problem caught before concrete pour
+   ₹5 lakh saved
+```
+
+---
+
+## Tech Stack
+
+| Service | Purpose | Cost |
+|---------|---------|------|
+| **Gemini 3 Pro** | AI brain | ~$0.008/query |
+| **Supermemory.ai** | Project memory | $19/month |
+| **Supabase** | Database + Storage | $25/month |
+| **Twilio** | WhatsApp API | ~$0.005/msg |
+
+---
+
+## Pricing
+
+```
+$1,000 USD/month per company
+
+INCLUDED:
+✓ Unlimited projects
+✓ Unlimited users  
+✓ 1,000 AI queries
+✓ 50 documents
+✓ 200 photos
+✓ 50 GB storage
+
+OVERAGES:
+• Query: $0.25
+• Document: $0.45
+• Photo: $0.15
+• Storage: $2/GB
+```
+
+---
+
+## Quick Start
+
+### 1. Setup Environment
 
 ```bash
-git clone https://github.com/Arjun0606/sitemind-AI.git
-cd sitemind-AI
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install dependencies
 cd backend
+cp .env.example .env
+# Edit .env with your API keys
+```
+
+### 2. Install Dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure
+### 3. Setup Database
+
+Run `database/schema.sql` in your Supabase SQL editor.
+
+### 4. Run Server
 
 ```bash
-# Copy example env
-cp .env.example .env
-
-# Edit with your API keys
-nano .env
-```
-
-### 3. Run
-
-```bash
-# Development
 uvicorn main:app --reload
-
-# Production
-uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-### 4. Docker (optional)
+### 5. Configure Twilio Webhook
 
-```bash
-docker-compose up -d
+Point your Twilio WhatsApp webhook to:
+```
+https://your-domain.com/whatsapp/webhook
 ```
 
 ---
 
-## ⚙️ Configuration
-
-### Required API Keys
-
-| Service | Purpose | Get it from |
-|---------|---------|-------------|
-| **Google Gemini** | AI reasoning | [makersuite.google.com](https://makersuite.google.com/app/apikey) |
-| **Supermemory** | Long-term memory | [supermemory.ai/dashboard](https://supermemory.ai/dashboard) |
-| **Supabase** | Database + Storage | [supabase.com](https://supabase.com) |
-| **Twilio** | WhatsApp | [twilio.com](https://console.twilio.com) |
-
-### Supabase Setup
-
-1. Create project at [supabase.com](https://supabase.com)
-2. Go to SQL Editor
-3. Run `backend/database/schema.sql`
-4. Create storage buckets: `documents`, `photos`, `exports`
-5. Copy API keys to `.env`
-
-### Twilio Setup
-
-1. Create account at [twilio.com](https://twilio.com)
-2. Go to Messaging > Try WhatsApp
-3. Join sandbox (follow instructions)
-4. Configure webhook URL: `https://your-domain.com/whatsapp/webhook`
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 sitemind/
 ├── backend/
-│   ├── main.py              # FastAPI app
-│   ├── config.py            # Settings
-│   ├── database/
-│   │   ├── schema.sql       # PostgreSQL schema
-│   │   └── supabase_client.py
-│   ├── services/
-│   │   ├── gemini_service.py    # AI
-│   │   ├── memory_service.py    # Long-term memory
-│   │   ├── whatsapp_service.py  # Messaging
-│   │   ├── storage_service.py   # Files
-│   │   ├── pricing_service.py   # Pricing
-│   │   └── billing_service.py   # Usage tracking
+│   ├── main.py                    # FastAPI app
+│   ├── config.py                  # Settings
 │   ├── routers/
-│   │   ├── whatsapp.py      # Webhook
-│   │   ├── admin.py         # Admin API
-│   │   └── health.py        # Health checks
-│   └── utils/
-│       └── logger.py
-├── Dockerfile
-├── docker-compose.yml
-├── railway.toml
-└── README.md
+│   │   ├── whatsapp.py           # WhatsApp webhook
+│   │   ├── dashboard.py          # Dashboard API
+│   │   └── admin.py              # Admin endpoints
+│   ├── services/
+│   │   ├── gemini_service.py     # AI (Gemini)
+│   │   ├── memory_service.py     # Memory (Supermemory)
+│   │   ├── connected_intelligence.py  # THE CORE
+│   │   ├── sitemind_core.py      # Main AI processing
+│   │   ├── whatsapp_service.py   # Twilio
+│   │   ├── storage_service.py    # Supabase storage
+│   │   ├── billing_service.py    # Usage tracking
+│   │   └── pricing_service.py    # Pricing rules
+│   └── database/
+│       └── schema.sql            # PostgreSQL schema
+│
+├── dashboard/                     # Next.js web dashboard
+│   └── src/pages/
+│       ├── index.tsx             # Main dashboard
+│       ├── alerts.tsx            # Mismatch alerts
+│       └── ...
+│
+└── BUSINESS_PLAN.md              # Full business plan
 ```
 
 ---
 
-## 🔌 API Endpoints
-
-### Health
-- `GET /` - App info
-- `GET /health` - Service status
+## API Endpoints
 
 ### WhatsApp
-- `POST /whatsapp/webhook` - Twilio webhook
+- `POST /whatsapp/webhook` - Receive messages from Twilio
 
-### Admin
-- `POST /admin/companies` - Create company
-- `POST /admin/users` - Create user
-- `POST /admin/projects` - Create project
-- `GET /admin/companies/{id}` - Get company
-- `GET /admin/companies/{id}/users` - List users
-- `GET /admin/billing/usage/{id}` - Get usage
-- `GET /admin/billing/charges/{id}` - Get charges
-- `POST /admin/billing/invoice/{id}` - Generate invoice
-- `GET /admin/pricing` - Get pricing
-- `GET /admin/pricing/calculate` - Calculate pricing
+### Dashboard API
+- `GET /api/dashboard/stats/{company_id}` - Company stats
+- `GET /api/dashboard/alerts/{company_id}` - Mismatch alerts
+- `GET /api/dashboard/reports/leakage/{company_id}` - Value report
+- `GET /api/dashboard/billing/usage/{company_id}` - Usage & billing
+- `GET /api/dashboard/specs/{company_id}` - Stored specifications
+- `GET /api/dashboard/search/{company_id}?q=query` - Search memory
 
 ---
 
-## 📱 WhatsApp Commands
+## WhatsApp Commands
 
 | Command | Description |
 |---------|-------------|
-| `help` | Show help |
-| `status` | Current usage |
-| Send photo | AI analysis |
-| Send PDF | Document storage |
-| Ask question | AI answers |
+| `/help` | Show available commands |
+| `/project` | List/switch projects |
+| `/specs` | View stored specifications |
+| `/alerts` | View mismatch alerts |
+| `/report` | Get value protected report |
+| `/search [query]` | Search project memory |
+| `/value` | Show value protected |
 
 ---
 
-## 🚀 Deployment
+## The Core Value
 
-### Railway (Recommended)
+```
+WITHOUT SITEMIND:
+─────────────────
+• Info scattered across 10+ WhatsApp groups
+• Wrong specs used → Rework → ₹5 lakh loss
+• "What did architect say?" → Nobody knows
+• Disputes → No proof
 
-```bash
-# Install Railway CLI
-npm i -g @railway/cli
-
-# Login
-railway login
-
-# Deploy
-railway up
+WITH SITEMIND:
+──────────────
+• Single Project Brain
+• Photo cross-ref → Caught in real-time
+• Every question answered with citation
+• Full audit trail with sources
 ```
 
-### Docker
+---
 
-```bash
-docker build -t sitemind .
-docker run -p 8000:8000 --env-file backend/.env sitemind
-```
+## License
+
+Proprietary - All rights reserved
 
 ---
 
-## 📊 Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| **Backend** | FastAPI (Python) |
-| **AI** | Google Gemini |
-| **Memory** | Supermemory.ai |
-| **Database** | Supabase (PostgreSQL) |
-| **Storage** | Supabase Storage |
-| **Messaging** | Twilio WhatsApp |
-| **Deployment** | Railway / Docker |
-
----
-
-## 📜 License
-
-MIT
-
----
-
-Built with ❤️ for Indian construction
+**SiteMind: Zero information gaps. Zero money leaks.**

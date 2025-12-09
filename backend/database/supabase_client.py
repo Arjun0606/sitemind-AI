@@ -214,6 +214,10 @@ class SupabaseClient:
             order="created_at.desc"
         )
     
+    async def get_projects(self, company_id: str) -> List[Dict]:
+        """Alias for get_company_projects"""
+        return await self.get_company_projects(company_id)
+    
     # =========================================================================
     # USERS
     # =========================================================================

@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SiteMind - Your Project's Memory</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.6;
+            color: #1a1a2e;
+            background: #fff;
+            padding: 40px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        @media print {
+            body { padding: 20px; max-width: 100%; }
+            .page-break { page-break-before: always; }
+        }
+        
+        .header {
+            text-align: center;
+            padding: 40px 0;
+            border-bottom: 3px solid #0066ff;
+            margin-bottom: 40px;
+        }
+        
+        .logo { font-size: 48px; font-weight: 700; color: #0066ff; }
+        .tagline { font-size: 20px; color: #666; margin-top: 10px; }
+        
+        h2 { 
+            font-size: 24px; 
+            color: #1a1a2e; 
+            margin: 40px 0 20px; 
+            padding-bottom: 10px; 
+            border-bottom: 2px solid #eee; 
+        }
+        
+        .hero-box {
+            background: linear-gradient(135deg, #0066ff 0%, #0044cc 100%);
+            color: white;
+            border-radius: 16px;
+            padding: 30px;
+            margin: 30px 0;
+            text-align: center;
+        }
+        
+        .hero-box h3 { font-size: 28px; margin-bottom: 15px; }
+        .hero-box p { font-size: 18px; opacity: 0.9; }
+        
+        .problem-box {
+            background: #fff5f5;
+            border-left: 4px solid #ff4444;
+            padding: 25px;
+            margin: 30px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .solution-box {
+            background: #f0fff4;
+            border-left: 4px solid #00cc66;
+            padding: 25px;
+            margin: 30px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .feature {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+            border: 1px solid #eee;
+        }
+        
+        .feature h4 {
+            color: #0066ff;
+            font-size: 18px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .feature-icon {
+            font-size: 24px;
+        }
+        
+        .example {
+            background: #1a1a2e;
+            color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-family: 'Menlo', monospace;
+            font-size: 13px;
+            line-height: 1.8;
+        }
+        
+        .example .user { color: #00cc66; }
+        .example .bot { color: #66b3ff; }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        
+        th { background: #f8f9fa; font-weight: 600; }
+        
+        .check-list { list-style: none; padding: 0; }
+        .check-list li { 
+            padding: 8px 0; 
+            padding-left: 28px; 
+            position: relative; 
+        }
+        .check-list li:before { 
+            content: "✓"; 
+            color: #00cc66; 
+            font-weight: bold; 
+            position: absolute; 
+            left: 0; 
+        }
+        
+        .text-center { text-align: center; }
+        hr { border: none; border-top: 2px solid #eee; margin: 40px 0; }
+        
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        @media (max-width: 600px) {
+            .two-col { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">🧠 SiteMind</div>
+        <div class="tagline">Your Project's Memory. Your Team's Brain.</div>
+    </div>
+
+    <div class="hero-box">
+        <h3>Never Lose Another Decision, Drawing, or Discussion</h3>
+        <p>Everything your team says in WhatsApp → Automatically captured, organized, and searchable forever.</p>
+    </div>
+
+    <h2>The Problem We Solve</h2>
+    
+    <div class="problem-box">
+        <h4 style="color: #cc0000; margin-bottom: 15px;">Every Day on Construction Sites:</h4>
+        <ul class="check-list" style="list-style: none;">
+            <li style="padding-left: 28px;">❌ "Who approved this change?" - Nobody remembers</li>
+            <li style="padding-left: 28px;">❌ "What did we decide on the call?" - Lost forever</li>
+            <li style="padding-left: 28px;">❌ "Is this the latest drawing?" - Nobody knows</li>
+            <li style="padding-left: 28px;">❌ "What issues are pending?" - Buried in 500 messages</li>
+            <li style="padding-left: 28px;">❌ "What did consultant say about handrail?" - Can't find it</li>
+        </ul>
+        <p style="margin-top: 15px; font-weight: 600; color: #cc0000;">
+            Result: ₹20-80 lakhs lost per project in disputes, rework, and delays.
+        </p>
+    </div>
+
+    <div class="solution-box">
+        <h4 style="color: #008844; margin-bottom: 15px;">With SiteMind:</h4>
+        <ul class="check-list">
+            <li>Everything said in WhatsApp is automatically captured</li>
+            <li>Decisions logged with who, when, and context</li>
+            <li>Phone calls documented with just one message</li>
+            <li>Always know which drawing version is latest</li>
+            <li>Just ask - get instant answers from project history</li>
+        </ul>
+    </div>
+
+    <h2>How It Works</h2>
+    
+    <p style="font-size: 18px; margin-bottom: 20px;">
+        <strong>Just talk naturally in WhatsApp.</strong> No commands. No training. SiteMind understands and remembers everything.
+    </p>
+
+    <div class="feature">
+        <h4><span class="feature-icon">💬</span> Everything Gets Remembered</h4>
+        <p>Every message your team sends is automatically stored and made searchable.</p>
+        
+        <div class="example"><span class="user">Site Engineer sends:</span>
+"Client approved vitrified tiles for bedrooms, extra cost 4.2 lakhs accepted"
+
+<span class="bot">SiteMind automatically:</span>
+✓ Detects this is a DECISION
+✓ Logs who said it (Site Engineer)
+✓ Logs when (exact timestamp)
+✓ Logs the amount (₹4.2L)
+✓ Makes it searchable forever
+
+<span class="bot">Later, anyone can ask:</span>
+"Who approved the tile change?"
+→ "Client approved vitrified tiles on 15-Dec, extra ₹4.2L - logged by Site Engineer"</div>
+    </div>
+
+    <div class="feature">
+        <h4><span class="feature-icon">📞</span> Phone Call Memory</h4>
+        <p>After any important call, just tell SiteMind what was discussed. It becomes permanent record.</p>
+        
+        <div class="example"><span class="user">PM sends after a call:</span>
+"Spoke to client Sharma about balcony extension. Approved for 1001-1010, 
+extra 8L per unit, upgraded railing design needed, timeline +2 weeks"
+
+<span class="bot">SiteMind captures:</span>
+✓ Call with: Client Sharma
+✓ Topic: Balcony extension
+✓ Approved: Units 1001-1010
+✓ Cost: ₹8L per unit
+✓ Request: Upgraded railing
+✓ Timeline: +2 weeks
+
+<span class="bot">Forever searchable:</span>
+"What was decided about balcony?"
+→ Full details with date and who logged it</div>
+    </div>
+
+    <div class="feature">
+        <h4><span class="feature-icon">📁</span> Drawing Version Control</h4>
+        <p>Upload drawings to SiteMind. Always know which version is latest. Get warned when old versions are mentioned.</p>
+        
+        <div class="example"><span class="user">PM uploads: STR-07-R3.pdf</span>
+
+<span class="bot">SiteMind responds:</span>
+"📐 Drawing stored!
+File: STR-07-R3.pdf
+Uploaded: 15-Dec by PM
+
+Note: This replaces STR-07-R2. I'll warn anyone who references the old version."
+
+<span class="user">Later, someone says:</span>
+"Using STR-07-R2 for column work"
+
+<span class="bot">SiteMind warns:</span>
+"⚠️ Heads up! STR-07-R3 is the latest version (uploaded 15-Dec).
+Here's the latest: [sends file]"</div>
+    </div>
+
+    <div class="feature">
+        <h4><span class="feature-icon">🔍</span> Instant Search</h4>
+        <p>Just ask any question. SiteMind searches everything that's been said and gives you the answer.</p>
+        
+        <div class="two-col">
+            <div class="example" style="margin: 5px 0;"><span class="user">"Who approved marble flooring?"</span>
+
+<span class="bot">"Client Mr. Sharma approved marble 
+flooring on 12-Dec. Extra cost ₹3.2L.
+Logged by: PM"</span></div>
+            
+            <div class="example" style="margin: 5px 0;"><span class="user">"What issues in Tower B?"</span>
+
+<span class="bot">"3 open issues in Tower B:
+🔴 Waterproofing leak - Unit 1204
+🟡 Tile alignment - Lobby
+🟡 Electrical delay - Floor 5"</span></div>
+        </div>
+    </div>
+
+    <div class="feature">
+        <h4><span class="feature-icon">📋</span> Automatic RFI Tracking</h4>
+        <p>When someone needs consultant input, SiteMind auto-detects and tracks it until answered.</p>
+        
+        <div class="example"><span class="user">Engineer sends:</span>
+"Need structural consultant to confirm - drawing shows 900mm handrail 
+but code says 1050mm. Which to follow?"
+
+<span class="bot">SiteMind auto-creates RFI:</span>
+📋 RFI Created
+Question: Handrail height - 900mm vs 1050mm
+Status: OPEN
+Raised by: Engineer
+Date: 15-Dec
+
+<span class="bot">Tracks until answered. Daily reminder if pending.</span>
+
+<span class="user">"What RFIs are pending?"</span>
+→ Shows list with days pending</div>
+    </div>
+
+    <div class="feature">
+        <h4><span class="feature-icon">⚠️</span> Issue Detection</h4>
+        <p>Report issues naturally. SiteMind logs them with severity and tracks until resolved.</p>
+        
+        <div class="example"><span class="user">"Water leaking in unit 1204 bathroom, looks like from above"</span>
+
+<span class="bot">SiteMind logs:</span>
+⚠️ Issue Logged
+Type: Waterproofing/Leakage
+Severity: HIGH
+Location: Unit 1204 bathroom
+Source: From above unit
+Reported by: [name]
+Time: 15-Dec 10:30 AM
+
+<span class="bot">Also notes:</span>
+"I've seen 2 similar issues in 1104 and 1004 - possible pattern in bathroom stack."</div>
+    </div>
+
+    <div class="feature">
+        <h4><span class="feature-icon">📊</span> Daily & Weekly Summaries</h4>
+        <p>Ask for a summary anytime. Get a complete overview of what happened.</p>
+        
+        <div class="example"><span class="user">"Give me today's summary"</span>
+
+<span class="bot">SiteMind generates:</span>
+
+📊 Daily Summary - 15 Dec 2024
+
+PROGRESS:
+• Slab casting done Floor 7 ✅
+• Brickwork 80% Floor 5
+• Electrical started Floor 4
+
+DECISIONS MADE:
+• Client approved vitrified tiles (+₹4.2L)
+• Waterproofing brand: Dr. Fixit
+• Balcony railing design finalized
+
+ISSUES (2 new):
+• 🔴 Waterproofing leak 1204
+• 🟡 Tile alignment lobby
+
+PENDING:
+• 3 RFIs awaiting response
+• Material delivery confirmation needed</div>
+    </div>
+
+    <div class="page-break"></div>
+
+    <h2>What SiteMind Tracks Automatically</h2>
+    
+    <table>
+        <tr>
+            <th>You Say...</th>
+            <th>SiteMind Understands</th>
+        </tr>
+        <tr>
+            <td>"Client approved marble flooring, extra 4L"</td>
+            <td>✅ DECISION - logs with amount, person, time</td>
+        </tr>
+        <tr>
+            <td>"Spoke to architect, use 12mm rebar confirmed"</td>
+            <td>✅ PHONE CALL - logs discussion and outcome</td>
+        </tr>
+        <tr>
+            <td>"Leakage found in unit 502 bathroom"</td>
+            <td>✅ ISSUE - logs with location and severity</td>
+        </tr>
+        <tr>
+            <td>"Need consultant input on handrail height"</td>
+            <td>✅ RFI - creates and tracks until answered</td>
+        </tr>
+        <tr>
+            <td>"Slab casting done floor 7, started curing"</td>
+            <td>✅ PROGRESS - logs work completed</td>
+        </tr>
+        <tr>
+            <td>"Waiting for rebar delivery"</td>
+            <td>✅ RISK - flags potential delay</td>
+        </tr>
+        <tr>
+            <td>Any other message</td>
+            <td>✅ STORED - searchable in project memory</td>
+        </tr>
+    </table>
+
+    <h2>Value Delivered</h2>
+    
+    <table>
+        <tr>
+            <th>Problem Prevented</th>
+            <th>Typical Cost</th>
+            <th>How SiteMind Helps</th>
+        </tr>
+        <tr>
+            <td>"Who approved this?" dispute</td>
+            <td>₹3-10 lakhs</td>
+            <td>Decision logged with name, date, context</td>
+        </tr>
+        <tr>
+            <td>Wrong drawing version used</td>
+            <td>₹5-15 lakhs rework</td>
+            <td>Version alerts when old drawing mentioned</td>
+        </tr>
+        <tr>
+            <td>Lost phone call decisions</td>
+            <td>₹2-5 lakhs</td>
+            <td>Call logs become permanent record</td>
+        </tr>
+        <tr>
+            <td>Unanswered RFIs causing delays</td>
+            <td>₹2-5 lakhs/week</td>
+            <td>Auto-tracking with daily reminders</td>
+        </tr>
+        <tr>
+            <td>Time spent searching messages</td>
+            <td>20+ hours/month</td>
+            <td>Instant search and answers</td>
+        </tr>
+    </table>
+    
+    <p style="font-size: 18px; margin-top: 20px; text-align: center;">
+        <strong>Prevent just ONE incident per month = 10-50x ROI</strong>
+    </p>
+
+    <h2>How to Use</h2>
+    
+    <div class="solution-box">
+        <h4 style="color: #008844;">Zero Learning Curve</h4>
+        <ol style="margin-top: 15px; padding-left: 20px;">
+            <li style="margin: 10px 0;"><strong>Add SiteMind to your project WhatsApp group</strong></li>
+            <li style="margin: 10px 0;"><strong>Upload your drawings</strong> (just send them to SiteMind)</li>
+            <li style="margin: 10px 0;"><strong>Talk normally</strong> - SiteMind understands and remembers</li>
+            <li style="margin: 10px 0;"><strong>Ask anytime</strong> - Get instant answers from project history</li>
+        </ol>
+        <p style="margin-top: 15px;">
+            That's it. No training needed. Just talk like you normally do.
+        </p>
+    </div>
+
+    <h2>Technical Details</h2>
+    
+    <table>
+        <tr><th>Component</th><th>What It Does</th></tr>
+        <tr>
+            <td>AI Engine (Gemini 3 Pro)</td>
+            <td>Understands messages, detects intent, generates summaries</td>
+        </tr>
+        <tr>
+            <td>Memory System (Supermemory)</td>
+            <td>Stores everything, enables semantic search</td>
+        </tr>
+        <tr>
+            <td>File Storage (Supabase)</td>
+            <td>Stores drawings, tracks versions</td>
+        </tr>
+        <tr>
+            <td>Communication (WhatsApp)</td>
+            <td>Works where your team already is</td>
+        </tr>
+        <tr>
+            <td>Languages</td>
+            <td>English, Hindi, Hinglish - mixed language understood</td>
+        </tr>
+    </table>
+
+    <hr>
+
+    <div class="text-center" style="padding: 40px 0;">
+        <div style="font-size: 36px; font-weight: 700; color: #0066ff;">🧠 SiteMind</div>
+        <p style="font-size: 18px; color: #666; margin-top: 10px;">
+            Your Project's Memory. Your Team's Brain.
+        </p>
+        <p style="margin-top: 20px; color: #999;">
+            Never lose another decision, drawing, or discussion.
+        </p>
+    </div>
+
+</body>
+</html>
